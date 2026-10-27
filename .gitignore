@@ -1,0 +1,22 @@
+.DS_Store
+node_modules/
+.venv/
+__pycache__/
+.env
+dist/
+build/
+
+# Symfony / PHP
+/.env.local
+/.env.local.php
+/.env.*.local
+/config/secrets/prod/prod.decrypt.private.php
+/public/bundles/
+/var/
+/vendor/
+/.phpunit.cache/
+/.php-cs-fixer.cache
+/phpstan.neon
+
+# Claude Code (local settings may contain credentials)
+.claude/settings.local.json
