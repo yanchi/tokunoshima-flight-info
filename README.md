@@ -4,7 +4,7 @@
 
 ## 動作環境
 
-- PHP 8.3 以上（拡張：ctype, iconv, intl, mbstring, pdo_sqlite）
+- PHP 8.4 以上（拡張：ctype, iconv, intl, mbstring, pdo_sqlite）
 - Composer 2
 - Symfony 7.4 LTS
 
