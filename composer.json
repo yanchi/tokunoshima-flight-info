@@ -57,7 +57,15 @@
         ],
         "post-update-cmd": [
             "@auto-scripts"
+        ],
+        "lint": [
+            "@php bin/console lint:yaml config --parse-tags",
+            "@php bin/console lint:twig templates",
+            "@php bin/console lint:container"
         ]
+    },
+    "scripts-descriptions": {
+        "lint": "Lint YAML config, Twig templates and the service container"
     },
     "conflict": {
         "symfony/symfony": "*"

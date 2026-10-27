@@ -22,6 +22,7 @@ ODPT のアクセストークンなどの認証情報は `.env.local` に書く�
 php bin/phpunit                          # テスト
 vendor/bin/phpstan analyse               # 静的解析
 vendor/bin/php-cs-fixer fix --dry-run --diff   # コーディング規約チェック
+composer lint                            # YAML設定・Twig・サービスコンテナの検証
 symfony server:start                     # 開発用サーバー（Symfony CLI）
 ```
 
