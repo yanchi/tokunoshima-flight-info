@@ -13,10 +13,11 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
  * Run before every production deploy. Fails while a setting required for
- * public release is empty, e.g. the contact address that the ODPT developer
- * guideline 3.1(3) requires. Prints variable names only, never their values.
+ * public release is empty or still a placeholder, e.g. the contact address
+ * that the ODPT developer guideline 3.1(3) requires. Prints variable names
+ * only, never their values.
  */
-#[AsCommand(name: 'app:check-deploy-config', description: 'Fails if a setting required for public release is empty')]
+#[AsCommand(name: 'app:check-deploy-config', description: 'Fails if a setting required for public release is empty or a placeholder')]
 final class CheckDeployConfigCommand extends Command
 {
     /**

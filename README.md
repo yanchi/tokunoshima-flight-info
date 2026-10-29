@@ -31,7 +31,7 @@ vendor/bin/phpstan analyse               # 静的解析
 vendor/bin/php-cs-fixer fix --dry-run --diff   # コーディング規約チェック
 composer lint                            # YAML設定・Twig・サービスコンテナの検証
 symfony server:start                     # 開発用サーバー（Symfony CLI）
-APP_ENV=prod php bin/console app:check-deploy-config  # 本番デプロイ前チェック（APP_SECRET・CONTACT_ADDRESS が空なら失敗。prod 以外では常に失敗。現状は手動で実行する。自動実行は #6）
+APP_ENV=prod php bin/console app:check-deploy-config  # 本番デプロイ前チェック（APP_SECRET・CONTACT_ADDRESS が空、または CONTACT_ADDRESS がプレースホルダーを含むなら失敗。prod 以外では常に失敗。現状は手動で実行する。自動実行は #6）
 ```
 
 ## ディレクトリ構成
