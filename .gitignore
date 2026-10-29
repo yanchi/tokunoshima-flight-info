@@ -29,3 +29,5 @@ build/
 # Raw ODPT responses kept for verification only. Not committed until
 # storing/redistributing them is confirmed (docs/data-source-verification.md §9 #1).
 /docs/evidence/**
+# The index has no keys or response bodies; see docs/evidence/README.md.
+!/docs/evidence/README.md
