@@ -47,6 +47,8 @@ final class CheckDeployConfigCommandTest extends TestCase
         yield 'contact empty' => ['test-secret', '', 'CONTACT_ADDRESS'];
         yield 'contact blank' => ['test-secret', '  ', 'CONTACT_ADDRESS'];
         yield 'contact placeholder' => ['test-secret', '〇〇', 'CONTACT_ADDRESS'];
+        yield 'contact placeholder in text' => ['test-secret', 'お問い合わせは〇〇まで', 'CONTACT_ADDRESS'];
+        yield 'contact look-alike placeholder' => ['test-secret', '○○', 'CONTACT_ADDRESS'];
         yield 'both empty' => ['', '', 'APP_SECRET, CONTACT_ADDRESS'];
     }
 
@@ -56,7 +58,7 @@ final class CheckDeployConfigCommandTest extends TestCase
         $tester = new CommandTester(new CheckDeployConfigCommand('prod', $secret, $contact));
 
         self::assertSame(Command::FAILURE, $tester->execute([], ['capture_stderr_separately' => true]));
-        self::assertStringContainsString('Empty settings: '.$expected, $tester->getErrorOutput());
+        self::assertStringContainsString('Unset settings (empty or placeholder): '.$expected, $tester->getErrorOutput());
         self::assertSame('', $tester->getDisplay());
     }
 

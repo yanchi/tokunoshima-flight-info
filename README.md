@@ -18,10 +18,10 @@ ODPT のアクセストークンなどの認証情報は `.env.local` に書く�
 
 | 環境変数 | 内容 |
 | --- | --- |
-| `APP_SECRET` | Symfony のシークレット。本番では実際の環境変数で渡す（コミットしない） |
+| `APP_SECRET` | Symfony のシークレット。値は Git にコミットしない。本番での渡し方はデプロイ手順で決める（#6） |
 | `ODPT_CONSUMER_KEY` | ODPT のアクセストークン（`.env.local` のみ） |
 | `FLIGHT_DATA_MAX_AGE_SECONDS` | これより古い運航データは「最新」として扱わない（秒）。暫定値 |
-| `CONTACT_ADDRESS` | 公式運航情報の案内に出す問い合わせ先。空の間は「お問い合わせは〇〇まで。」の文を出さない。空でよいのは開発・テスト環境だけで、本番公開前に必ず設定する |
+| `CONTACT_ADDRESS` | 公式運航情報の案内に出す問い合わせ先。空の間は「お問い合わせは〇〇まで。」の文を出さない。空でよいのは開発・テスト環境だけで、本番公開前に必ず設定する。プレースホルダーの「〇〇」（「○○」も）を含む値は、デプロイ前チェックで未設定として扱う |
 
 ## 開発コマンド
 
@@ -31,7 +31,7 @@ vendor/bin/phpstan analyse               # 静的解析
 vendor/bin/php-cs-fixer fix --dry-run --diff   # コーディング規約チェック
 composer lint                            # YAML設定・Twig・サービスコンテナの検証
 symfony server:start                     # 開発用サーバー（Symfony CLI）
-APP_ENV=prod php bin/console app:check-deploy-config  # 本番デプロイ前チェック（APP_SECRET・CONTACT_ADDRESS が空なら失敗。prod 以外では常に失敗）
+APP_ENV=prod php bin/console app:check-deploy-config  # 本番デプロイ前チェック（APP_SECRET・CONTACT_ADDRESS が空なら失敗。prod 以外では常に失敗。現状は手動で実行する。自動実行は #6）
 ```
 
 ## ディレクトリ構成

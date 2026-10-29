@@ -19,8 +19,11 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 #[AsCommand(name: 'app:check-deploy-config', description: 'Fails if a setting required for public release is empty')]
 final class CheckDeployConfigCommand extends Command
 {
-    /** The placeholder used in CLAUDE.md §6 until the contact is decided. */
-    private const CONTACT_PLACEHOLDER = '〇〇';
+    /**
+     * The placeholder used in CLAUDE.md §6 until the contact is decided, and
+     * its look-alike (U+25CB WHITE CIRCLE).
+     */
+    private const CONTACT_PLACEHOLDERS = ['〇〇', '○○'];
 
     public function __construct(
         #[Autowire('%kernel.environment%')]
@@ -45,16 +48,16 @@ final class CheckDeployConfigCommand extends Command
             return Command::FAILURE;
         }
 
-        $missing = array_keys(array_filter(
-            [
-                'APP_SECRET' => $this->appSecret,
-                'CONTACT_ADDRESS' => str_replace(self::CONTACT_PLACEHOLDER, '', $this->contactAddress),
-            ],
-            static fn (string $value): bool => '' === trim($value),
-        ));
+        $missing = [];
+        if ('' === trim($this->appSecret)) {
+            $missing[] = 'APP_SECRET';
+        }
+        if ('' === trim($this->contactAddress) || $this->containsPlaceholder($this->contactAddress)) {
+            $missing[] = 'CONTACT_ADDRESS';
+        }
 
         if ([] !== $missing) {
-            $errorOutput->writeln(\sprintf('<error>Empty settings: %s</error>', implode(', ', $missing)));
+            $errorOutput->writeln(\sprintf('<error>Unset settings (empty or placeholder): %s</error>', implode(', ', $missing)));
 
             return Command::FAILURE;
         }
@@ -62,5 +65,16 @@ final class CheckDeployConfigCommand extends Command
         $output->writeln('Deploy settings OK.');
 
         return Command::SUCCESS;
+    }
+
+    private function containsPlaceholder(string $value): bool
+    {
+        foreach (self::CONTACT_PLACEHOLDERS as $placeholder) {
+            if (str_contains($value, $placeholder)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }
