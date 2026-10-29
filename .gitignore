@@ -25,3 +25,7 @@ build/
 
 # Raw token file dropped by hand; the key belongs in .env.local
 /access-token.txt
+
+# Raw ODPT responses kept for verification only. Not committed until
+# storing/redistributing them is confirmed (docs/data-source-verification.md §9 #1).
+/docs/evidence/

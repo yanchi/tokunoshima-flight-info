@@ -14,9 +14,9 @@
 | 1 | ODPT 利用規約・アカウント・費用 | 条件付きOK（アカウント未取得） | 2026-10-27 |
 | 2 | 公開サイトでの加工表示・キャッシュ・再配信・出典表示 | 条件付きOK（キャッシュ・DB保存は BLOCKED） | 2026-10-27 |
 | 3 | API エンドポイント・認証方法・スキーマ | OK（文書上） | 2026-10-27 |
-| 4 | TKN の識別子と JAC 運航便の収録 | BLOCKED（実レスポンス未確認） | 2026-10-27 |
-| 5 | 時刻表データの有無と内容 | BLOCKED（TKN 収録未確認） | 2026-10-27 |
-| 6 | リアルタイム出発・到着（遅延・欠航）データの有無 | BLOCKED（TKN 収録・欠航の表現が未確認） | 2026-10-27 |
+| 4 | TKN の識別子と JAC 運航便の収録 | 条件付きOK（TKN 発着便は収録。運航会社はデータで区別できない） | 2026-10-29 |
+| 5 | 時刻表データの有無と内容 | 条件付きOK（収録あり。特定日の運航・時刻変更は自由記述の `odpt:note` にしかない） | 2026-10-29 |
+| 6 | リアルタイム出発・到着（遅延・欠航）データの有無 | 一部確認（TKN 収録あり。欠航便の扱い・運航時間帯の推移は未確認） | 2026-10-29 |
 | 7 | 代替データソース（公式運航情報の案内・手動入力）の扱い | JAL へのリンクは設置せず案内文で対応／時刻表の出典は §5 の結果待ち | 2026-10-27 |
 
 **Go/No-Go 判断：** 運航状況の自動公開は No-Go（現時点）。§10 参照。
@@ -48,6 +48,7 @@
 | 費用 | 規約には「プロバイダ接続料金および通信費等は、通信を行った者の負担」（第4条第2項）とのみあり、利用料の定めは見当たらない | 規約 第4条 |
 | 呼び出し制限 | 「呼び出し回数、アクセス時間等に関する制約を本センターの判断で定めることができる」（第4条第4項）。過度な負荷は利用停止の事由（第10条第2項(8)） | 規約 第4条・第10条 |
 | 件数上限（FAQ） | 静的データ（BusstopPole以外）1000件、動的データ 制限なし、OR検索の値は10個まで | 開発者サイト FAQ |
+| 呼び出し回数の上限（実測） | 応答ヘッダー `X-RateLimit-Limit-minute: 60`、`-hour: 3600`、`-day: 24000`（2026-10-29 の応答。文書上の定めは未確認） | §4 検証ログ |
 | 営利・非営利 | 「営利、非営利を問わず基本ライセンスデータを利用することができます」（基本ライセンス 第4条第7項） | 基本ライセンス |
 | 提供停止 | センターはいつでも理由を問わず API 提供を停止・中止できる（規約 第11条第2項） | 規約 |
 
@@ -172,77 +173,111 @@
 OK（文書上）。実レスポンスでの確認は §4〜§6 で行う。
 
 ### 未確認点
-- `odpt:FlightStatus` の値の一覧（仕様書の例は `CheckIn`、`Takeoff`、`Arrived` のみ。欠航を表す値は未確認）→ 実際に `odpt:FlightStatus` API を呼んで取得する
-- 応答の `odpt:frequency` の有無と値（ガイドラインは更新間隔の基準にこれを使うよう求めているが、航空の型定義には見当たらなかった）
-- HTTP ステータスコードとエラー応答本文の形式
+- ~~`odpt:FlightStatus` の値の一覧~~ → 2026-10-29 に取得（§6）。欠航は `odpt.FlightStatus:Cancelled`
+- ~~応答の `odpt:frequency` の有無~~ → 2026-10-29 の航空系の応答には含まれていなかった。更新間隔の基準は `dct:valid` を使う（§6）
+- ~~HTTP ステータスコードとエラー応答本文の形式~~ → 2026-10-29 に確認。本文は JSON ではなくプレーンテキスト
+  - キーなし：403 `Require acl:consumerKey.`
+  - キー誤り：403 `Invalid acl:consumerKey.`
+  - 存在しないデータ型：404 `There is no rdf:type : NoSuchType`
+  - 存在しないパラメータ名（例：`foo=bar`）：**200 で空配列**。パラメータ名の誤りを「データなし」と区別できない。実装では、時刻表上は便がある日に空配列が返ったら異常として扱う
 
 ## 4. TKN の識別子と JAC 運航便の収録
 
 ※ 実際の API レスポンスで検証する。レスポンスの保存時は APIキーを含めない。
 
 ### 確認項目
-- [ ] 徳之島空港の公式識別子（`odpt.Airport:TKN` が存在するか）
-- [ ] JAC 運航便が JAL データセットに収録されているか
-- [ ] 運航会社 JAC と販売上の JAL 便名を区別できるか（`odpt:airline` の値）
-- [ ] 対象路線のうち収録されている路線
+- [x] 徳之島空港の公式識別子 → `odpt.Airport:TKN` が存在する（`dc:title`「徳之島」、`odpt:airportTitle` ja「徳之島」／en「Tokunoshima」）
+- [x] JAC 運航便が JAL データセットに収録されているか → TKN 発着便は JAL データセットに収録されている。ただし、そのうちどの便が JAC 運航かはデータから判定できない（次項）
+- [x] 運航会社 JAC と販売上の JAL 便名を区別できるか → **区別できない**。時刻表・出発・到着のすべてのレコードで `odpt:airline` は `odpt.Operator:JAL`
+- [x] 対象路線のうち収録されている路線 → TKN–KOJ（鹿児島）、TKN–ASJ（奄美）、TKN–OKE（沖永良部）、TKN–ITM（伊丹）の4路線（往復とも）
 
 ### これまでに分かったこと
-- データカタログに「日本エアコミューター」の組織・データセットはない（https://ckan.odpt.org/dataset/?q=日本エアコミューター → 0件、2026-10-27）。JAC 便が含まれるとすれば JAL のデータセットの中。
-- JAL データセットの説明は「日本航空の国内線」とだけあり、グループ会社（JAC、J-AIR 等）の運航便を含むかは**書かれていない**。
-- 出発・到着データセットの注意書き：「他社運航によるコードシェア便の情報は、開示される内容と異なっている場合、もしくは情報が公開されず表示されない場合がございます。」JAC 運航便がこの「他社運航」に当たるかは不明。
-- 徳之島の就航路線について、一次情報は未確認。旅行予約サイトに「JAC による奄美および鹿児島線」との記載がある（二次情報。https://www.his-j.com/kokunai/air/airport/tkn.html）。
+- データカタログに「日本エアコミューター」の組織・データセットはない（https://ckan.odpt.org/dataset/?q=日本エアコミューター → 0件、2026-10-27）。
+- JAL データセットの説明は「日本航空の国内線」とだけあり、グループ会社の運航便を含むかは書かれていない。
+- 出発・到着データセットの注意書き：「他社運航によるコードシェア便の情報は、開示される内容と異なっている場合、もしくは情報が公開されず表示されない場合がございます。」
+- 2026-10-29 の実レスポンス：`odpt:operator` を指定しない出発情報の検索でも、TKN の結果は `odpt.Operator:JAL` 提供の7件だけだった。JAL 以外の提供元（空港事業者など）の TKN データはない。
+- `odpt:aircraftType` には `AT4`・`AT7`・`E70` などの機材コードが入る。**機材から運航会社を推定しない**（推測による表示になるため）。
 
-### 検証手順（アカウント取得後）
-1. `odpt:Airport?owl:sameAs=odpt.Airport:TKN` で空港の存在を確認する
-2. `odpt:FlightSchedule?odpt:operator=odpt.Operator:JAL&odpt:originAirport=odpt.Airport:TKN`、および `odpt:destinationAirport=odpt.Airport:TKN` で時刻表を確認する
-3. `odpt:FlightInformationDeparture?odpt:operator=odpt.Operator:JAL&odpt:departureAirport=odpt.Airport:TKN`、`odpt:FlightInformationArrival?...&odpt:arrivalAirport=odpt.Airport:TKN` を、運航時間帯の複数の時刻に取得する
-4. `odpt:airline` の値（`odpt.Operator:JAC` 等が入るか）を確認する
-5. 取得したレスポンスはキーを除いて `docs/evidence/`（Git 管理外にするかは要相談）に保存し、下表に記録する
+### 実装への影響
+- `operator_code` に「JAC」を入れられる根拠がデータにない。ODPT 由来の便は `odpt:airline` の値（`JAL`）をそのまま保持し、画面で「JAC 運航」と表示しない。運航会社を表示する場合は、別の一次情報で確認してからにする。
+- 空港の日本語名は `odpt:Airport` の `odpt:airportTitle` を使える（§8 申し送りの「空港名の対応表」）。
 
 ### 検証ログ
+レスポンスはキーを除いて `docs/evidence/2026-10-29/` に保存した。DB 保存・再配信の可否（§9 #1）が未回答のため、Git 管理外（`.gitignore`）にしている。
+
 | 実施日時（JST） | リクエスト（キーは伏せる） | 結果概要 | 保存先 |
 |-----------------|----------------------------|----------|--------|
-| | | | |
+| 2026-10-29 23:41 | `odpt:Airport?owl:sameAs=odpt.Airport:TKN` | 200、1件 | `airport_tkn.json` |
+| 2026-10-29 23:41 | `odpt:FlightSchedule?odpt:operator=odpt.Operator:JAL&odpt:originAirport=odpt.Airport:TKN` | 200、28件（4路線×7曜日）、`dc:date` はすべて 2026-08-21T13:00:00+09:00 | `sched_from.json` |
+| 2026-10-29 23:41 | `odpt:FlightSchedule?odpt:operator=odpt.Operator:JAL&odpt:destinationAirport=odpt.Airport:TKN` | 200、28件（同上） | `sched_to.json` |
+| 2026-10-29 23:41 | `odpt:FlightInformationDeparture?odpt:operator=odpt.Operator:JAL&odpt:departureAirport=odpt.Airport:TKN` | 200、7件。すべて `Departed` | `dep.json` |
+| 2026-10-29 23:41 | `odpt:FlightInformationArrival?odpt:operator=odpt.Operator:JAL&odpt:arrivalAirport=odpt.Airport:TKN` | 200、7件。すべて `Arrived` | `arr.json` |
+| 2026-10-29 23:41 | `odpt:FlightStatus` | 200、32件 | `status.json` |
+| 2026-10-29 23:41 | `odpt:FlightInformationDeparture?odpt:departureAirport=odpt.Airport:TKN`（operator 指定なし） | 200、7件（JAL のみ） | 保存なし |
+| 2026-10-29 23:41 | エラー応答（キーなし・キー誤り・型なし・パラメータ名誤り） | §3 未確認点を参照 | 保存なし |
 
 ### 結論
-BLOCKED（アカウント未取得のため実レスポンス未確認）
+条件付きOK。TKN の識別子は `odpt.Airport:TKN` で確定。TKN 発着便は JAL データセットに収録されている。ただし運航会社は `odpt.Operator:JAL` としか分からないため、JAC 運航であることを画面に表示する根拠にはならない。
 
 ### 未確認点
-- 上記の確認項目すべて
+- 収録されている便が TKN 発着の全便か（JAL グループ以外の航空会社の就航有無を含む）。一次情報（航空会社の公式時刻表）との突き合わせは未実施
+- JAL 運航と JAC 運航の区別が必要な場面があるか（仕様判断）
 
 ## 5. 時刻表データ
 
 ### 確認項目
-- [ ] TKN 発着便の時刻表が取得できるか
-- [ ] 有効期間（ダイヤ改正への追従）、曜日運航・期間運航の表現
-- [ ] 更新頻度
+- [x] TKN 発着便の時刻表が取得できるか → 取得できる（§4 検証ログ）
+- [x] 有効期間（ダイヤ改正への追従）、曜日運航・期間運航の表現 → 下記
+- [ ] 更新頻度 → 全レコードの `dc:date` が 2026-08-21。更新のタイミングは未確認
 
-### これまでに分かったこと
-- スキーマ上は曜日ごとのカレンダー（`odpt:calendar`）と、便ごとの適用期間（`odpt:isValidFrom` / `odpt:isValidTo`）で期間運航を表現できる。
-- 静的データとして扱われ、ガイドラインでは更新通知から1週間以内の反映が求められる。
+### 確認できた内容
+- 1レコード＝「区間×曜日」（例：`odpt.FlightSchedule:JAL.TKN.KOJ.Thursday`）。各レコードの `odpt:flightScheduleObject[]` に便が並ぶ。
+- 期間運航は便ごとの `odpt:isValidFrom` / `odpt:isValidTo` で表現される。同じ便名が、期間ごとに別の要素として並ぶ（例：JL3842 は 2026-07-01〜08-31、09-01〜10-24、10-25〜2027-01-04 の3要素）。2027-01-04 より先のデータはまだない。
+- 便の要素に含まれる項目：`odpt:airline`、`odpt:flightNumber`、`odpt:originTime`、`odpt:destinationTime`、`odpt:isValidFrom`、`odpt:isValidTo`、`odpt:aircraftType`、`odpt:note`。`odpt:originDayDifference` / `odpt:destinationDayDifference` は TKN の便には出てこなかった（日付跨ぎの便がない）。
+- **特定日の運航・時刻変更は自由記述の `odpt:note` にしかない。** 例（2026-10-29 の木曜レコード）：
+  - JL2470 / JL2471（TKN–ITM）：`12/28・1/1・運航`。曜日レコードには毎週載っているが、実際に運航するのは記載の日だけと読める。2026-10-29 の出発・到着情報にも JL2470 / JL2471 はなかった
+  - JL3794：`11/16-23・1時間40分早発1時間45分早着・ATR運航`
+  - JL3797：`12/1-1/4・10分早発`
+
+### 実装への影響
+- 構造化項目（曜日・`isValidFrom/To`・時刻）だけで「この日の時刻表」を作ると、`odpt:note` に書かれた運航日の限定や時刻変更が反映されず、**運航しない便や誤った時刻を表示する**。`odpt:note` を機械的に解釈するのは表記ゆれがあり危険。
+- 対応案（要判断）：`odpt:note` がある便は、時刻表の時刻に「備考あり・要公式確認」を付けて備考の原文を併記する。運航日の限定を表す備考の便は表示しない、などの扱いを仕様で決める。
 
 ### 結論
-BLOCKED（TKN の収録が未確認）
+条件付きOK（データは取得できる。`odpt:note` の扱いを決めるまで、時刻表をそのまま表示しない）
 
 ### 未確認点
-- TKN 発着の収録、期間運航や臨時便の実際の表現、データの更新タイミング
+- 時刻表データの更新タイミング（ダイヤ改正・臨時便の反映時期）
+- 臨時便の表現（`odpt.FlightStatus:ExtraFlight` は運航情報側の値。時刻表に載るかは未確認）
+- 時刻表と公式時刻表との一致（突き合わせ未実施）
 
 ## 6. リアルタイム出発・到着データ
 
 ### 確認項目
-- [ ] TKN 発着の出発・到着情報が取得できるか（時刻表とは別に検証）
-- [ ] 欠航を示すフィールドの有無と値
-- [x] 遅延・変更時刻（予定／予想／実績）の区別 → スキーマ上は `scheduled*` / `estimated*` / `actual*` で区別される
-- [ ] 提供される更新頻度・遅延（ラグ）
+- [x] TKN 発着の出発・到着情報が取得できるか → 取得できる。2026-10-29 は出発7件・到着7件で、同日の木曜時刻表から `odpt:note` で運航日が限られる JL2470 / JL2471 を除いた便と一致した
+- [ ] 欠航を示すフィールドの有無と値 → 値は `odpt.FlightStatus:Cancelled`（欠航）がある。欠航便が実際にどう返るか（レスポンスに残るか）は未観測
+- [x] 遅延・変更時刻（予定／予想／実績）の区別 → `odpt:scheduledDepartureTime` / `odpt:actualDepartureTime`（到着は `*ArrivalTime`）を実データで確認。`odpt:estimated*` は今回の応答（全便出発・到着済み）にはなかった
+- [ ] 提供される更新頻度・遅延（ラグ） → `dct:valid` は `dc:date` の7分後（出発・到着とも）。`dc:date` は取得時刻の数分以内だった。運航時間帯の推移は未確認
 - [x] 当日以外のデータ範囲 → 仕様上「当日」の情報のみ。前日・翌日は対象外
 
+### 確認できた内容
+- 出発情報の項目：`dc:date`、`dct:valid`、`owl:sameAs`（`odpt.FlightInformationDeparture:JAL.TKN.<便名>`）、`odpt:operator`、`odpt:airline`、`odpt:flightNumber`、`odpt:flightStatus`、`odpt:scheduledDepartureTime`、`odpt:actualDepartureTime`、`odpt:departureAirport`、`odpt:destinationAirport`、`odpt:departureGate`、`odpt:aircraftType`、`odpt:flightInformationSummary` / `odpt:flightInformationText`（遅延時のみ）
+- 到着情報も同様（`odpt:arrivalAirport`、`odpt:originAirport`、`odpt:scheduledArrivalTime`、`odpt:actualArrivalTime`。ゲートはなし）
+- 遅延時は `odpt:flightStatus` が `Departed` / `Arrived` のまま、`odpt:flightInformationSummary` に「出発遅延」（en `Delayed`）、`odpt:flightInformationText` に理由（例：「使用する飛行機の到着遅れのため出発に遅延が生じています。」）が入った。**到着便のレコードにも「出発遅延」と入る**（出発地での遅延の説明）。
+- 実績時刻が定刻より早い便がある（例：JL3711 定刻 12:05・実績 11:56）。実績と定刻の差だけで「遅延」と判定しない。
+- `odpt:FlightStatus` の値（32件、2026-10-29 取得。ja / en の表記）：
+  `Adjusting` 機材繰り、`Arrived` 到着済み、`BadWeather` 天候不良、`BaggageAvailable` 手荷物引渡中、`BoardingComplete` 搭乗終了、`Cancelled` 欠航、`CheckInClose` 搭乗手続終了、`CheckIn` 搭乗手続中、`Delayed` 遅れ、`Departed` 出発済み、`DestinationChanged` 到着地変更、`Diverted` 到着地変更、`EstimatedArrival` 到着予定、`EstimatedDeparture` 出発予定、`ExtraFlight` 臨時便、`FinalCall` 最終搭乗案内、`InAir` 航行中、`Indefinite` 時刻未定、`Landed` 着陸済み、`LateArrival` 使用機遅れ、`LeftGate` ゲート出発済み、`Maintenance` 使用機整備、`NewTime` 時刻変更、`NowBoarding` 搭乗中、`OnTime` 定刻、`Other` その他、`PostponedTomorrow` 翌日運行、`StopCheckIn` 搭乗手続中止中、`Takeoff` 離陸済み、`Unknown` 不明、`WeatherCheck` 天候調査中、`Yesterday` 昨日便
+  - 本サービスの `FlightStatus`（7値）より細かい。天候調査中・時刻未定・到着地変更など、7値に当てはめると意味が変わる値がある。対応表は仕様として決める必要がある。
+
 ### 結論
-BLOCKED（TKN の収録、欠航の表現、更新頻度が未確認）
+一部確認。TKN の出発・到着情報は取得でき、予定・実績・遅延理由の項目も確認できた。欠航便の扱いと、運航時間帯（搭乗手続中・見込み時刻など）の状態の推移は未観測。
 
 ### 未確認点
-- `odpt:FlightStatus` における欠航・遅延・引き返し・条件付き運航（天候調査中など）の値
-- 欠航便がレスポンスに残るのか、消えるのか
-- `dct:valid` の実際の間隔
+- 欠航便がレスポンスに残るか、消えるか（欠航が発生した日に取得して確認する）
+- 運航時間帯の状態・`odpt:estimated*` の出方（運航時間帯の複数時刻に取得して確認する）
+- 天候調査中・条件付き運航の表現（`WeatherCheck`、`flightInformationText` の内容）
+- 日付の切り替わり時刻（深夜帯に前日分がいつ消えるか。`Yesterday` 値の使われ方）
+- `dct:valid`（7分）が常に同じ間隔か
 
 ## 7. 代替データソース
 
@@ -323,14 +358,15 @@ JAL 公式サイトへのリンクは**設置しない**。代わりに、リン
   - 「運航状況未確認」と「状況不明」の区別
   - 到着便画面での「出発済み」の表現
 - 空港は IATA コードだけで表示している。日本語の空港名は、検証済みの一次情報（ODPT `odpt:Airport` の名称など）の対応表から引く。対応表にない空港はコードだけを表示する。
-- 本番で `CONTACT_ADDRESS` が空のまま公開できないよう、デプロイ前チェックを設ける（ODPT ガイドライン 3.1(3) で問い合わせ先の明記が必須）。
+- ~~本番で `CONTACT_ADDRESS` が空のまま公開できないよう、デプロイ前チェックを設ける（ODPT ガイドライン 3.1(3) で問い合わせ先の明記が必須）。~~ → 2026-10-29 に `php bin/console app:check-deploy-config` を追加（`APP_SECRET` も対象）。デプロイ手順への組み込みはデプロイ手順の作成時に行う。
+- ODPT 実データ（§4〜§6）で分かった論点：`odpt:note` の扱い（§5）、`odpt:FlightStatus` 32値と画面ラベルの対応（§6）、遅延を `flightInformationSummary` で判定するか（§6）、運航会社を表示しない（§4）。
 
 ## 9. 問い合わせ事項（BLOCKED 一覧）
 
 | # | 宛先 | 内容 | 送付日 | 回答 |
 |---|------|------|--------|------|
 | 1 | ODPT 事務局 | 取得データをサーバーの DB にキャッシュ・保存して表示に使うことは基本ライセンス上問題ないか。保存期間の制限はあるか | | |
-| 2 | ODPT 事務局 | JAL の各データセットに、日本エアコミューター（JAC）など JAL グループ他社の運航便が含まれるか（実データで確認できない場合のみ） | | |
+| 2 | ODPT 事務局 | JAL の各データセットに、日本エアコミューター（JAC）など JAL グループ他社の運航便が含まれるか（実データで確認できない場合のみ） | — | 不要の見込み：2026-10-29 の実データで TKN 発着便の収録を確認。運航会社はデータで区別できない（§4） |
 | 3 | ODPT 事務局 | JAL リアルタイム出発・到着情報の更新間隔と、推奨されるポーリング間隔・呼び出し回数の上限 | | |
 | 4 | ODPT 事務局 | 欠航便の表現（`odpt:FlightStatus` の値、レスポンスに残るか）について資料があるか | | |
 
@@ -338,8 +374,8 @@ JAL 公式サイトへのリンクは**設置しない**。代わりに、リン
 
 | 対象 | 判断 | 根拠 | 判断日 |
 |------|------|------|--------|
-| 時刻表の自動取得（ODPT） | 保留 | ライセンスは条件付きOK。TKN の収録と DB 保存の可否が BLOCKED | 2026-10-27 |
-| 運航状況の自動公開（ODPT） | **No-Go（現時点）** | TKN・JAC 便の収録、欠航の表現が未確認 | 2026-10-27 |
+| 時刻表の自動取得（ODPT） | 保留 | TKN の収録は確認済み（§5）。DB 保存の可否（§9 #1）が BLOCKED。`odpt:note` の扱いが未決定 | 2026-10-29 |
+| 運航状況の自動公開（ODPT） | **No-Go（現時点）** | TKN 発着便の収録は確認済み（§6）。欠航便の扱いと運航時間帯の推移が未観測、DB 保存の可否（§9 #1）が BLOCKED | 2026-10-29 |
 | Phase 1 MVP（公式運航情報の案内＋検証済み時刻表） | 条件付き Go | UI・ドメインの開発は着手可。公開前に、時刻表の出典（§5/§7）の確認と、問い合わせ先の決定が必要 | 2026-10-27 |
 
 運航状況の自動公開は、利用許諾と必要なデータの両方が確認されるまで有効化しない。
@@ -348,4 +384,6 @@ JAL 公式サイトへのリンクは**設置しない**。代わりに、リン
 1. developer.odpt.org で開発者アカウントを申請する（承認まで最大2営業日）
 2. 開発者サイトで規約・基本ライセンス・ガイドラインの原文をブラウザで目視確認する
 3. 本サイトの問い合わせ先（案内文の〇〇）を決める。JAL サイト利用規約を確認する
-4. アクセストークン取得後、§4 の検証手順を実施する（トークンは `.env.local` に保存し、Git にコミットしない）
+4. ~~アクセストークン取得後、§4 の検証手順を実施する~~ → 2026-10-29 実施（23:41 の1回のみ）
+5. 運航時間帯（例：7時台・12時台・17時台）と、欠航・天候調査中が出た日に、§6 の未確認点を確認するための追加取得を行う
+6. §9 #1（DB 保存の可否）を ODPT 事務局に問い合わせる
