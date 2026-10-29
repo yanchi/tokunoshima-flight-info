@@ -23,12 +23,13 @@ final class FlightBoardExtension extends AbstractExtension
         return [
             new TwigFunction('flight_status_label', $this->statusLabel(...)),
             new TwigFunction('flight_estimated_at', $this->estimatedAt(...)),
+            new TwigFunction('flight_status_modifier', $this->statusModifier(...)),
         ];
     }
 
     public function statusLabel(DailyFlightBoard $board, FlightRow $flight): string
     {
-        if ($board->isStale() && $flight->status->isObserved()) {
+        if ($this->isWithheld($board, $flight)) {
             return self::STALE_STATUS_LABEL;
         }
 
@@ -43,8 +44,22 @@ final class FlightBoardExtension extends AbstractExtension
         };
     }
 
+    /**
+     * CSS modifier for the status badge. Withheld statuses get none, so that
+     * a stale "delayed" or "cancelled" is not styled as current.
+     */
+    public function statusModifier(DailyFlightBoard $board, FlightRow $flight): ?string
+    {
+        return $this->isWithheld($board, $flight) ? null : 'status--'.$flight->status->value;
+    }
+
     public function estimatedAt(DailyFlightBoard $board, FlightRow $flight): ?\DateTimeImmutable
     {
         return $board->isStale() ? null : $flight->estimatedAt;
+    }
+
+    private function isWithheld(DailyFlightBoard $board, FlightRow $flight): bool
+    {
+        return $board->isStale() && $flight->status->isObserved();
     }
 }

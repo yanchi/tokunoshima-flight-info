@@ -51,6 +51,15 @@ final class BoardTodayTest extends WebTestCase
         self::assertSelectorTextSame('#board-heading', '徳之島発（出発便）');
     }
 
+    public function testDoesNotLoadHotReloadScriptsOutsideDev(): void
+    {
+        $this->client->request('GET', '/', server: ['FRANKENPHP_HOT_RELOAD' => 'https://hot-reload.example.invalid']);
+
+        self::assertResponseIsSuccessful();
+        self::assertSelectorNotExists('meta[name="frankenphp-hot-reload:url"]');
+        self::assertSelectorNotExists('script[src*="cdn.jsdelivr.net"]');
+    }
+
     public function testSwitchesToArrivals(): void
     {
         $this->client->request('GET', '/?direction=arrival');
@@ -179,7 +188,7 @@ final class BoardTodayTest extends WebTestCase
 
         $this->client->request('GET', '/');
 
-        self::assertSelectorTextSame('.board-empty', '表示できる便がありません。'.self::OFFICIAL_SENTENCE);
+        self::assertSelectorTextSame('.board-empty', '本サイトには表示できる便の情報がありません。'.self::OFFICIAL_SENTENCE);
     }
 
     public function testStaleDataWithholdsObservedStatusAndEstimate(): void
