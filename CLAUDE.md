@@ -36,7 +36,7 @@
 - 日本標準時（Asia/Tokyo）を画面・日付判定の基準とする。保存日時は原則UTC。
 
 ## 3. 技術スタック
-- PHP 8.3以上（導入時点でサポート中の安定版を確認）
+- PHP 8.4以上（本番はVPS上のコンテナで動かすため、PHPのバージョンはイメージで固定する）
 - Symfony（導入時点でサポート中のLTS版を優先）
 - Twig + Symfony UX/Stimulus または最小限のJavaScript。SPAは不要。
 - Doctrine ORM + Migrations、DBはSQLite（開発・小規模MVP）を第一候補。必要に応じMySQL/PostgreSQLへ移行。

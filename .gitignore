@@ -2,11 +2,11 @@
 node_modules/
 .venv/
 __pycache__/
-.env
 dist/
 build/
 
 # Symfony / PHP
+# .env holds committed defaults only; secrets (e.g. ODPT_CONSUMER_KEY) go in .env.local
 /.env.local
 /.env.local.php
 /.env.*.local
@@ -15,8 +15,13 @@ build/
 /var/
 /vendor/
 /.phpunit.cache/
+/phpunit.xml
+/.php-cs-fixer.php
 /.php-cs-fixer.cache
 /phpstan.neon
 
 # Claude Code (local settings may contain credentials)
 .claude/settings.local.json
+
+# Raw token file dropped by hand; the key belongs in .env.local
+/access-token.txt
