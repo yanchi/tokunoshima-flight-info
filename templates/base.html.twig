@@ -25,22 +25,24 @@
             <p class="site-name">
                 <a href="{{ path('board_today') }}"><span class="site-name-icon" aria-hidden="true">✈</span>徳之島空港 発着案内<span class="site-name-note">（非公式）</span></a>
             </p>
-            <p class="sibling-link"><a href="https://ship.isl-mentor.com/">フェリーの運航情報はこちら</a></p>
+            <p class="sibling-link"><a href="{{ sibling_ferry_site_url }}">フェリーの運航情報はこちら</a></p>
         </header>
         <main class="site-main">
-            {% if app.request.attributes.get('_route') != 'board_today' %}
-                <p class="back-link"><a href="{{ path('board_today') }}">← 本日の発着便に戻る</a></p>
-            {% endif %}
+            {% block back_link %}
+                <p class="back-link"><a href="{{ path('board_today') }}"><span aria-hidden="true">← </span>本日の発着便に戻る</a></p>
+            {% endblock %}
             {% block body %}{% endblock %}
         </main>
         <footer class="site-footer">
             {{ include('_official_notice.html.twig') }}
             <p>本サイトは航空会社とは関係のない非公式サイトです。</p>
             <nav class="footer-nav" aria-label="サイト情報">
+                {# Child templates set nav_current to mark their own link. #}
+                {% set current = nav_current|default(null) %}
                 <ul>
-                    <li><a href="{{ path('board_today') }}">本日の発着便</a></li>
-                    <li><a href="{{ path('info_about') }}">このサイトについて</a></li>
-                    <li><a href="{{ path('info_sources') }}">データの出典</a></li>
+                    <li><a href="{{ path('board_today') }}"{% if current == 'board' %} aria-current="page"{% endif %}>本日の発着便</a></li>
+                    <li><a href="{{ path('info_about') }}"{% if current == 'about' %} aria-current="page"{% endif %}>このサイトについて</a></li>
+                    <li><a href="{{ path('info_sources') }}"{% if current == 'sources' %} aria-current="page"{% endif %}>データの出典</a></li>
                 </ul>
             </nav>
         </footer>

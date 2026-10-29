@@ -5,6 +5,7 @@ twig:
         timezone: Asia/Tokyo
     globals:
         contact_address: '%env(CONTACT_ADDRESS)%'
+        sibling_ferry_site_url: 'https://ship.isl-mentor.com/'
 
 when@test:
     twig:

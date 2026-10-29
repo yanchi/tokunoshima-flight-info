@@ -19,16 +19,31 @@ final class InfoPagesTest extends WebTestCase
         $this->client = static::createClient();
     }
 
+    protected function tearDown(): void
+    {
+        unset($_ENV['CONTACT_ADDRESS'], $_SERVER['CONTACT_ADDRESS']);
+        parent::tearDown();
+    }
+
     /**
      * @return iterable<string, array{string, string}>
      */
-    public static function pages(): iterable
+    public static function pagesWithHeadings(): iterable
     {
         yield 'about' => ['/about', 'このサイトについて'];
         yield 'sources' => ['/sources', 'データの出典'];
     }
 
-    #[DataProvider('pages')]
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function pages(): iterable
+    {
+        yield 'about' => ['/about'];
+        yield 'sources' => ['/sources'];
+    }
+
+    #[DataProvider('pagesWithHeadings')]
     public function testShowsPage(string $path, string $heading): void
     {
         $this->client->request('GET', $path);
@@ -39,7 +54,7 @@ final class InfoPagesTest extends WebTestCase
     }
 
     #[DataProvider('pages')]
-    public function testShowsOfficialNoticeWithoutLinkingToJal(string $path, string $heading): void
+    public function testShowsOfficialNoticeWithoutLinkingToJal(string $path): void
     {
         $crawler = $this->client->request('GET', $path);
 
@@ -49,11 +64,12 @@ final class InfoPagesTest extends WebTestCase
     }
 
     #[DataProvider('pages')]
-    public function testLinksBackToTodaysBoard(string $path, string $heading): void
+    public function testLinksBackToTodaysBoard(string $path): void
     {
         $this->client->request('GET', $path);
 
         self::assertSelectorTextSame('main .back-link a[href="/"]', '← 本日の発着便に戻る');
+        self::assertSelectorTextSame('main .back-link a [aria-hidden="true"]', '←');
     }
 
     public function testTodaysBoardHasNoBackLink(): void
@@ -63,13 +79,48 @@ final class InfoPagesTest extends WebTestCase
         self::assertSelectorNotExists('.back-link');
     }
 
-    public function testFooterLinksToInfoPages(): void
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function allPages(): iterable
     {
-        $this->client->request('GET', '/');
+        yield 'board' => ['/'];
+        yield 'about' => ['/about'];
+        yield 'sources' => ['/sources'];
+    }
+
+    #[DataProvider('allPages')]
+    public function testFooterLinksToEveryPageAndMarksTheCurrentOne(string $path): void
+    {
+        $this->client->request('GET', $path);
 
         self::assertSelectorExists('.footer-nav a[href="/"]');
         self::assertSelectorExists('.footer-nav a[href="/about"]');
         self::assertSelectorExists('.footer-nav a[href="/sources"]');
+        self::assertSelectorCount(1, '.footer-nav a[aria-current="page"]');
+        self::assertSelectorExists(\sprintf('.footer-nav a[href="%s"][aria-current="page"]', $path));
+    }
+
+    public function testShowsContactAsPendingWhileContactAddressIsUnset(): void
+    {
+        $this->client->request('GET', '/about');
+
+        self::assertSelectorTextSame('.contact-address', '準備中');
+    }
+
+    #[DataProvider('pages')]
+    public function testShowsContactAddressWhenSet(string $path): void
+    {
+        self::ensureKernelShutdown();
+        $_ENV['CONTACT_ADDRESS'] = $_SERVER['CONTACT_ADDRESS'] = 'contact@example.test';
+        $client = static::createClient();
+
+        $client->request('GET', $path);
+
+        self::assertSelectorTextContains('.official-notice', 'お問い合わせはcontact@example.testまで。');
+        if ('/about' === $path) {
+            self::assertSelectorTextSame('.contact-address', 'contact@example.test');
+        }
     }
 
     public function testHeaderLinksToSiblingFerrySite(): void
