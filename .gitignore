@@ -28,4 +28,4 @@ build/
 
 # Raw ODPT responses kept for verification only. Not committed until
 # storing/redistributing them is confirmed (docs/data-source-verification.md §9 #1).
-/docs/evidence/
+/docs/evidence/**
