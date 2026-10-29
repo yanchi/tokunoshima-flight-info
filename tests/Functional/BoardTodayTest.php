@@ -96,6 +96,7 @@ final class BoardTodayTest extends WebTestCase
 
     public function testProductionWiringHasNoData(): void
     {
+        // @phpstan-ignore staticMethod.alreadyNarrowedType (PHPStan reads the type from the container XML; the runtime wiring is what this test guards)
         self::assertInstanceOf(
             NoDataFlightBoardRepository::class,
             static::getContainer()->get(FlightBoardRepositoryInterface::class),
