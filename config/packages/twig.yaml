@@ -1,5 +1,10 @@
 twig:
     file_name_pattern: '*.twig'
+    # Stored times are UTC; everything on screen is JST.
+    date:
+        timezone: Asia/Tokyo
+    globals:
+        contact_address: '%env(CONTACT_ADDRESS)%'
 
 when@test:
     twig:

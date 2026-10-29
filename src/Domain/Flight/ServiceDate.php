@@ -47,6 +47,15 @@ final readonly class ServiceDate
         return $this->toString() === $other->toString();
     }
 
+    /**
+     * Midnight JST of this date. Use this instead of formatting the Y-m-d
+     * string, which would be parsed in PHP's default time zone.
+     */
+    public function toDateTime(): \DateTimeImmutable
+    {
+        return $this->date;
+    }
+
     public function toString(): string
     {
         return $this->date->format('Y-m-d');

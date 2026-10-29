@@ -1,0 +1,8 @@
+{# Wording is fixed by CLAUDE.md §6. No link to JAL: linking needs JAL's approval. #}
+<aside class="official-notice" aria-label="公式運航情報のご案内">
+    <p>{{ include('_official_status_sentence.html.twig')|trim }}</p>
+    <p>
+        本サイトの表示内容について、航空会社への問い合わせはご遠慮ください。
+        {%- if contact_address %}お問い合わせは{{ contact_address }}まで。{% endif %}
+    </p>
+</aside>

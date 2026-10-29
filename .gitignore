@@ -22,3 +22,6 @@ build/
 
 # Claude Code (local settings may contain credentials)
 .claude/settings.local.json
+
+# Raw token file dropped by hand; the key belongs in .env.local
+/access-token.txt

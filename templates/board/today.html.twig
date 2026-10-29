@@ -1,0 +1,86 @@
+{% extends 'base.html.twig' %}
+
+{% set is_departure = board.direction.value == 'departure' %}
+{% set weekdays = ['日', '月', '火', '水', '木', '金', '土'] %}
+{% set official_sentence = include('_official_status_sentence.html.twig')|trim %}
+
+{% block title %}本日の{{ is_departure ? '出発便' : '到着便' }} | {{ parent() }}{% endblock %}
+
+{% block body %}
+    <h1>本日の発着便</h1>
+    <p class="board-date">
+        {{ board.date.toDateTime|date('Y年n月j日') }}（{{ weekdays[board.date.toDateTime|date('w')] }}）
+    </p>
+
+    <nav class="tabs" aria-label="出発・到着の切り替え">
+        <a href="{{ path('board_today') }}"{% if is_departure %} aria-current="page"{% endif %}>出発</a>
+        <a href="{{ path('board_today', {direction: 'arrival'}) }}"{% if not is_departure %} aria-current="page"{% endif %}>到着</a>
+    </nav>
+
+    <section class="board" aria-labelledby="board-heading">
+        <h2 id="board-heading">{{ is_departure ? '徳之島発（出発便）' : '徳之島着（到着便）' }}</h2>
+
+        <dl class="board-meta">
+            <dt>最終取得</dt>
+            <dd>
+                {%- if board.fetchedAt -%}
+                    <time datetime="{{ board.fetchedAt|date('c') }}">{{ board.fetchedAt|date('Y年n月j日 H:i') }}</time>（日本時間）
+                {%- else -%}
+                    未取得
+                {%- endif -%}
+            </dd>
+            <dt>取得元</dt>
+            <dd>{{ board.sourceName ?? 'なし' }}</dd>
+        </dl>
+
+        {% if board.unavailable %}
+            <div class="message message--error" role="status">
+                <p class="message-title">運航情報を取得できません</p>
+                <p>現在、本サイトでは便の情報を表示できません。{{ official_sentence }}</p>
+            </div>
+        {% else %}
+            {% if board.stale %}
+                <div class="message message--warning" role="status">
+                    <p class="message-title">最終取得から時間が経過しています</p>
+                    <p>運航状況の更新が停止しています。{{ official_sentence }}</p>
+                </div>
+            {% endif %}
+
+            {% if board.flights is empty %}
+                <p class="board-empty">表示できる便がありません。{{ official_sentence }}</p>
+            {% else %}
+                <div class="table-wrap">
+                    <table class="flights">
+                        <thead>
+                            <tr>
+                                <th scope="col">便名</th>
+                                <th scope="col">区間</th>
+                                <th scope="col">{{ is_departure ? '出発予定' : '到着予定' }}</th>
+                                <th scope="col">変更後（見込み）</th>
+                                <th scope="col">運航状況</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for flight in board.flights %}
+                                {% set estimated_at = flight_estimated_at(board, flight) %}
+                                <tr>
+                                    <th scope="row">{{ flight.flightNumber }}</th>
+                                    <td>{{ flight.origin }} → {{ flight.destination }}</td>
+                                    <td><time datetime="{{ flight.scheduledAt|date('c') }}">{{ flight.scheduledAt|date('H:i') }}</time></td>
+                                    <td>
+                                        {%- if estimated_at -%}
+                                            <time datetime="{{ estimated_at|date('c') }}">{{ estimated_at|date('H:i') }}</time>
+                                        {%- else -%}
+                                            <span aria-hidden="true">—</span><span class="visually-hidden">なし</span>
+                                        {%- endif -%}
+                                    </td>
+                                    <td><span class="status{% if not (board.stale and flight.status.observed) %} status--{{ flight.status.value }}{% endif %}">{{ flight_status_label(board, flight) }}</span></td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            {% endif %}
+        {% endif %}
+    </section>
+{% endblock %}

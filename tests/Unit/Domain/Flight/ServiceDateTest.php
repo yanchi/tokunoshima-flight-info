@@ -58,4 +58,12 @@ final class ServiceDateTest extends TestCase
         self::assertTrue($date->equals(ServiceDate::fromInstant(new \DateTimeImmutable('2026-10-27T00:00:00+00:00'))));
         self::assertFalse($date->equals(ServiceDate::fromString('2026-10-28')));
     }
+
+    public function testToDateTimeIsJstMidnight(): void
+    {
+        self::assertSame(
+            '2026-10-27T00:00:00+09:00',
+            ServiceDate::fromString('2026-10-27')->toDateTime()->format(\DateTimeInterface::ATOM),
+        );
+    }
 }
