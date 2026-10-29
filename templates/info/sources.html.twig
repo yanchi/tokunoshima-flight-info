@@ -1,0 +1,46 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}データの出典 | {{ parent() }}{% endblock %}
+
+{% block body %}
+    <h1>データの出典</h1>
+
+    <section class="info-section" aria-labelledby="sources-current">
+        <h2 id="sources-current">現在表示しているデータ</h2>
+        {# No data source is approved yet (CLAUDE.md §7). When one is enabled, list it here
+           and add the ODPT notice required by its guideline 3.1 (docs/data-source-verification.md §2). #}
+        <div class="table-wrap">
+            <table class="info-table">
+                <thead>
+                    <tr>
+                        <th scope="col">種類</th>
+                        <th scope="col">取得元</th>
+                        <th scope="col">状態</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <th scope="row">時刻表</th>
+                        <td>なし</td>
+                        <td>準備中</td>
+                    </tr>
+                    <tr>
+                        <th scope="row">運航状況</th>
+                        <td>なし</td>
+                        <td>準備中</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <p>現在、本サイトでは便の情報を表示していません。</p>
+    </section>
+
+    <section class="info-section" aria-labelledby="sources-handling">
+        <h2 id="sources-handling">データの取り扱い</h2>
+        <ul>
+            <li>表示するデータには、取得日時と取得元をあわせて表示します。</li>
+            <li>時刻表に備考がある便は「備考のある便」の枠にまとめ、備考は原文のまま表示します。備考の内容から時刻や運航日を書き換えることはしません。</li>
+            <li>取得したデータを、ほかのサービスが再利用できる形（API、ファイルのダウンロードなど）では提供しません。</li>
+        </ul>
+    </section>
+{% endblock %}
