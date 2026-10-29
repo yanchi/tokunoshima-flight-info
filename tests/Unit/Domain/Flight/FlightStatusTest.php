@@ -24,6 +24,7 @@ final class FlightStatusTest extends TestCase
 
     public function testBackingValuesMatchDataModel(): void
     {
+        // @phpstan-ignore staticMethod.alreadyNarrowedType (pins the stored values so that changing an enum case breaks this test)
         self::assertSame(
             ['scheduled', 'on_time', 'delayed', 'cancelled', 'departed', 'arrived', 'unknown'],
             array_map(static fn (FlightStatus $s): string => $s->value, FlightStatus::cases()),
