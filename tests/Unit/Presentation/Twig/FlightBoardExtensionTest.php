@@ -79,12 +79,16 @@ final class FlightBoardExtensionTest extends TestCase
     public function testStatusModifierFollowsWithholding(): void
     {
         $delayed = FictionalFlights::departure(FlightStatus::Delayed, '2026-10-29T10:00:00+09:00');
+        $cancelled = FictionalFlights::departure(FlightStatus::Cancelled, '2026-10-29T10:00:00+09:00');
         $scheduled = FictionalFlights::departure(FlightStatus::Scheduled, '2026-10-29T10:00:00+09:00');
+        $unknown = FictionalFlights::departure(FlightStatus::Unknown, '2026-10-29T10:00:00+09:00');
         $extension = new FlightBoardExtension();
 
         self::assertSame('status--delayed', $extension->statusModifier($this->board(DataAvailability::Fresh, $delayed), $delayed));
         self::assertNull($extension->statusModifier($this->board(DataAvailability::Stale, $delayed), $delayed));
+        self::assertNull($extension->statusModifier($this->board(DataAvailability::Stale, $cancelled), $cancelled));
         self::assertSame('status--scheduled', $extension->statusModifier($this->board(DataAvailability::Stale, $scheduled), $scheduled));
+        self::assertSame('status--unknown', $extension->statusModifier($this->board(DataAvailability::Stale, $unknown), $unknown));
     }
 
     private function board(DataAvailability $availability, FlightRow $flight): DailyFlightBoard
