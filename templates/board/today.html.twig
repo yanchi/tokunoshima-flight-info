@@ -1,10 +1,14 @@
 {% extends 'base.html.twig' %}
 
+{% set nav_current = 'board' %}
 {% set is_departure = board.direction.value == 'departure' %}
 {% set weekdays = ['日', '月', '火', '水', '木', '金', '土'] %}
 {% set official_sentence = include('_official_status_sentence.html.twig')|trim %}
 
 {% block title %}本日の{{ is_departure ? '出発便' : '到着便' }} | {{ parent() }}{% endblock %}
+
+{# This page is where the back link leads. #}
+{% block back_link %}{% endblock %}
 
 {% block body %}
     <h1>本日の発着便</h1>

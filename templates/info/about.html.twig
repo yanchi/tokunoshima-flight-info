@@ -1,0 +1,55 @@
+{% extends 'base.html.twig' %}
+
+{% set nav_current = 'about' %}
+
+{% block title %}このサイトについて | {{ parent() }}{% endblock %}
+
+{% block body %}
+    <h1>このサイトについて</h1>
+
+    <section class="info-section" aria-labelledby="about-site">
+        <h2 id="about-site">サイトの概要</h2>
+        {# Update together with /sources when a data source is enabled. #}
+        <p>徳之島空港（TKN）を発着する航空便の時刻表と、当日の運航状況を確認できるサイトを目指しています。現在は準備中で、便の情報は表示していません。</p>
+        <p>無料・非営利で運営しています。登録やログインは不要で、広告はありません。</p>
+    </section>
+
+    <section class="info-section" aria-labelledby="about-unofficial">
+        <h2 id="about-unofficial">非公式サイトです</h2>
+        <p>本サイトは非公式サイトで、航空会社、空港、データ提供者が運営・監修するものではありません。これらの事業者や団体が本サイトの内容を保証するものではありません。</p>
+    </section>
+
+    <section class="info-section" aria-labelledby="about-disclaimer">
+        <h2 id="about-disclaimer">免責事項</h2>
+        <ul>
+            <li>表示内容の正確性・完全性は保証しません。</li>
+            <li>ご搭乗やお出かけの判断は、必ず航空会社の公式情報で行ってください。</li>
+            <li>本サイトの利用によって生じた損害について、運営者は責任を負いません。</li>
+        </ul>
+    </section>
+
+    <section class="info-section" aria-labelledby="about-policy">
+        <h2 id="about-policy">更新方針</h2>
+        <ul>
+            <li>時刻はすべて日本時間で表示します。</li>
+            <li>各一覧に、最終取得日時と取得元を表示します。</li>
+            <li>データを取得できないときは「運航情報を取得できません」と表示します。</li>
+            <li>一定時間更新できないときは「更新停止／要公式確認」と表示し、古い情報を最新の情報として表示しません。</li>
+            <li>時刻表しかない便は「運航状況未確認」と表示し、定刻どおりとは扱いません。</li>
+        </ul>
+        <p>データの出典は<a href="{{ path('info_sources') }}">データの出典</a>のページをご覧ください。</p>
+    </section>
+
+    <section class="info-section" aria-labelledby="about-contact">
+        <h2 id="about-contact">お問い合わせ</h2>
+        <p class="contact-address">{{ contact_address ?: '準備中' }}</p>
+        <p>本サイトの表示内容について、航空会社への問い合わせはご遠慮ください。</p>
+    </section>
+
+    <section class="info-section" aria-labelledby="about-related">
+        <h2 id="about-related">関連サイト</h2>
+        <ul>
+            <li><a href="{{ sibling_ferry_site_url }}">鹿児島〜沖縄・奄美大島フェリー運航情報</a></li>
+        </ul>
+    </section>
+{% endblock %}
