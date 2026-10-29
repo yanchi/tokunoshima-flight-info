@@ -4,7 +4,7 @@
 
 ## 動作環境
 
-- PHP 8.4 以上（拡張：ctype, iconv, intl, mbstring, pdo_sqlite）
+- PHP 8.4 以上（拡張：ctype, iconv。`composer.json` の `require` と揃える）
 - Composer 2
 - Symfony 7.4 LTS
 
@@ -30,6 +30,7 @@ vendor/bin/phpstan analyse               # 静的解析
 vendor/bin/php-cs-fixer fix --dry-run --diff   # コーディング規約チェック
 composer lint                            # YAML設定・Twig・サービスコンテナの検証
 symfony server:start                     # 開発用サーバー（Symfony CLI）
+php bin/console app:check-deploy-config  # 本番デプロイ前チェック（APP_SECRET・CONTACT_ADDRESS が空なら失敗）
 ```
 
 ## ディレクトリ構成

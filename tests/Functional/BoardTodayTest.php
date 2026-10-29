@@ -179,7 +179,7 @@ final class BoardTodayTest extends WebTestCase
 
         $this->client->request('GET', '/');
 
-        self::assertSelectorTextSame('.board-empty', '表示できる便がありません。'.self::OFFICIAL_SENTENCE);
+        self::assertSelectorTextSame('.board-empty', '本サイトには表示できる便の情報がありません。'.self::OFFICIAL_SENTENCE);
     }
 
     public function testStaleDataWithholdsObservedStatusAndEstimate(): void

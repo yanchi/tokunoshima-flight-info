@@ -47,7 +47,7 @@
             {% endif %}
 
             {% if board.flights is empty %}
-                <p class="board-empty">表示できる便がありません。{{ official_sentence }}</p>
+                <p class="board-empty">本サイトには表示できる便の情報がありません。{{ official_sentence }}</p>
             {% else %}
                 <div class="table-wrap">
                     <table class="flights">
@@ -63,6 +63,7 @@
                         <tbody>
                             {% for flight in board.flights %}
                                 {% set estimated_at = flight_estimated_at(board, flight) %}
+                                {% set status_modifier = flight_status_modifier(board, flight) %}
                                 <tr>
                                     <th scope="row">{{ flight.flightNumber }}</th>
                                     <td>{{ flight.origin }} → {{ flight.destination }}</td>
@@ -74,7 +75,7 @@
                                             <span aria-hidden="true">—</span><span class="visually-hidden">なし</span>
                                         {%- endif -%}
                                     </td>
-                                    <td><span class="status{% if not (board.stale and flight.status.observed) %} status--{{ flight.status.value }}{% endif %}">{{ flight_status_label(board, flight) }}</span></td>
+                                    <td><span class="status{% if status_modifier %} {{ status_modifier }}{% endif %}">{{ flight_status_label(board, flight) }}</span></td>
                                 </tr>
                             {% endfor %}
                         </tbody>
