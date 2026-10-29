@@ -1,0 +1,61 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# PR は新しい push で古い実行を止める。main は止めない
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  php-tests:
+    name: PHPUnit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # 本番イメージと同じ PHP 8.4。date.timezone は setup-php の初期値（UTC）のままにする。
+      # JST の判定は ServiceDate などがコード側で Asia/Tokyo を指定しているので、ini に頼らないことを CI でも確かめる
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Install Composer dependencies
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Check code style (PHP-CS-Fixer)
+        run: vendor/bin/php-cs-fixer check --diff
+
+      - name: PHPStan
+        run: vendor/bin/phpstan analyse --no-progress --memory-limit=1G
+
+      - name: Lint YAML, Twig and DI container
+        run: composer lint
+
+      - name: Run PHPUnit
+        run: php bin/phpunit
+
+  # 依存パッケージの既知の脆弱性
+  audit:
+    name: Dependency audit
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: none
+
+      - name: Audit Composer dependencies
+        run: composer audit --locked
