@@ -19,7 +19,7 @@ final readonly class OperatorCode
 
     public static function fromString(string $value): self
     {
-        if (1 !== preg_match('/^[A-Z0-9]{2,3}$/', $value)) {
+        if (1 !== preg_match('/\A[A-Z0-9]{2,3}\z/', $value)) {
             throw new \InvalidArgumentException(\sprintf('Invalid operator code: "%s".', $value));
         }
 

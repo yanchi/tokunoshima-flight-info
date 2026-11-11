@@ -34,6 +34,7 @@ final class CodesTest extends TestCase
         yield 'ICAO code' => ['RJKN'];
         yield 'too short' => ['TK'];
         yield 'surrounding space' => [' TKN'];
+        yield 'trailing newline' => ["TKN\n"];
     }
 
     #[DataProvider('invalidAirportCodes')]
@@ -62,6 +63,7 @@ final class CodesTest extends TestCase
         yield 'five digits' => ['ZZ12345'];
         yield 'space inside' => ['ZZ 123'];
         yield 'lowercase' => ['zz123'];
+        yield 'trailing newline' => ["ZZ123\n"];
     }
 
     #[DataProvider('invalidFlightNumbers')]
@@ -79,10 +81,20 @@ final class CodesTest extends TestCase
         self::assertFalse(OperatorCode::fromString('ZZ')->equals(OperatorCode::fromString('Z9')));
     }
 
-    public function testOperatorCodeRejectsInvalid(): void
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function invalidOperatorCodes(): iterable
+    {
+        yield 'too long' => ['ZZZZ'];
+        yield 'trailing newline' => ["ZZ\n"];
+    }
+
+    #[DataProvider('invalidOperatorCodes')]
+    public function testOperatorCodeRejectsInvalid(string $value): void
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        OperatorCode::fromString('ZZZZ');
+        OperatorCode::fromString($value);
     }
 }
