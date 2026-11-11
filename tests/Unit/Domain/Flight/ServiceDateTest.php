@@ -24,6 +24,7 @@ final class ServiceDateTest extends TestCase
         yield 'missing zero padding' => ['2026-1-05'];
         yield 'with time' => ['2026-10-27 10:00'];
         yield 'empty' => [''];
+        yield 'trailing newline' => ["2026-10-27\n"];
     }
 
     #[DataProvider('invalidDates')]
