@@ -24,3 +24,11 @@ URL の `<KEY>` は、本物のキーを伏せた箇所。
 |---|---|---|
 | nokey.{body.txt,headers} | `odpt:Airport?owl:sameAs=odpt.Airport:TKN`（キーなし） | 403 |
 | badkey.{body.txt,headers} | `odpt:Airport?owl:sameAs=odpt.Airport:TKN&acl:consumerKey=invalid000` | 403 |
+
+## 2026-11-11（15:07 JST 頃）
+公式時刻表との照合（検証記録 §7）に使うため、時刻表を再取得した。内容は 2026-10-29 の `sched_from.json` / `sched_to.json` と同一（`dc:date` 2026-08-21T13:00:00+09:00）。
+
+| ファイル | リクエスト | HTTP |
+|---|---|---|
+| sched_from.{json,headers} | `odpt:FlightSchedule?odpt:operator=odpt.Operator:JAL&odpt:originAirport=odpt.Airport:TKN&acl:consumerKey=<KEY>` | 200 |
+| sched_to.{json,headers} | `odpt:FlightSchedule?odpt:operator=odpt.Operator:JAL&odpt:destinationAirport=odpt.Airport:TKN&acl:consumerKey=<KEY>` | 200 |
