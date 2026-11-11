@@ -16,7 +16,7 @@ final readonly class FlightNumber
 
     public static function fromString(string $value): self
     {
-        if (1 !== preg_match('/^[A-Z0-9]{2}[0-9]{1,4}[A-Z]?$/', $value)) {
+        if (1 !== preg_match('/\A[A-Z0-9]{2}[0-9]{1,4}[A-Z]?\z/', $value)) {
             throw new \InvalidArgumentException(\sprintf('Invalid flight number: "%s".', $value));
         }
 

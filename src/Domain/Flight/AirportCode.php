@@ -15,7 +15,7 @@ final readonly class AirportCode
 
     public static function fromString(string $value): self
     {
-        if (1 !== preg_match('/^[A-Z]{3}$/', $value)) {
+        if (1 !== preg_match('/\A[A-Z]{3}\z/', $value)) {
             throw new \InvalidArgumentException(\sprintf('Invalid IATA airport code: "%s".', $value));
         }
 
