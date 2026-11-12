@@ -153,8 +153,8 @@ final class OdptTimetableMapper
             $weekday,
             $this->time($direction, $object, 'odpt:originTime', $at),
             $this->time($direction, $object, 'odpt:destinationTime', $at),
-            $this->optionalInt($direction, $object, 'odpt:originDayDifference', $at),
-            $this->optionalInt($direction, $object, 'odpt:destinationDayDifference', $at),
+            $this->dayDifference($direction, $object, 'odpt:originDayDifference', $at),
+            $this->dayDifference($direction, $object, 'odpt:destinationDayDifference', $at),
             $validFrom,
             $validTo,
             $this->note($direction, $object, $at),
@@ -283,6 +283,23 @@ final class OdptTimetableMapper
         $value = $object[$key] ?? null;
         if (!\is_string($value) || 1 !== preg_match(self::TIME_PATTERN, $value)) {
             throw $this->fail($direction, \sprintf('%s has an invalid %s', $at, $key));
+        }
+
+        return $value;
+    }
+
+    /**
+     * Only flights on a single day pass (null or 0). Whether the period's
+     * calendar days are departure or arrival days is not decided, and both
+     * give the same days only when nothing crosses midnight (§7 step 7).
+     *
+     * @param array<mixed> $object
+     */
+    private function dayDifference(Direction $direction, array $object, string $key, string $at): ?int
+    {
+        $value = $this->optionalInt($direction, $object, $key, $at);
+        if (null !== $value && 0 !== $value) {
+            throw $this->fail($direction, \sprintf('%s has a %s other than 0', $at, $key));
         }
 
         return $value;

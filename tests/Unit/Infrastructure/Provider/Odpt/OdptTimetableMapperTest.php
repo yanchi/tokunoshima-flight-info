@@ -63,18 +63,18 @@ final class OdptTimetableMapperTest extends TestCase
         self::assertNull($result->entries[0]->destinationDayDifference);
     }
 
-    public function testKeepsDayDifferenceWhenPresent(): void
+    public function testKeepsZeroDayDifferenceAsZero(): void
     {
-        $flight = FictionalOdptTimetable::flight('ZZ1002', '23:30', '00:10');
+        $flight = FictionalOdptTimetable::flight('ZZ1002', '10:30', '11:10');
         $flight['odpt:originDayDifference'] = 0;
-        $flight['odpt:destinationDayDifference'] = 1;
+        $flight['odpt:destinationDayDifference'] = 0;
 
         $result = $this->mapper->map(Direction::Arrival, [
             FictionalOdptTimetable::record('ZZZ', 'TKN', 'Friday', [$flight]),
         ], new \DateTimeImmutable());
 
         self::assertSame(0, $result->entries[0]->originDayDifference);
-        self::assertSame(1, $result->entries[0]->destinationDayDifference);
+        self::assertSame(0, $result->entries[0]->destinationDayDifference);
     }
 
     public function testLatestDataDateIsTheNewestRecordDate(): void
@@ -222,6 +222,8 @@ final class OdptTimetableMapperTest extends TestCase
             $flight,
             array_replace($flight, ['odpt:originTime' => '10:00', 'odpt:isValidFrom' => '2027-01-04T00:00:00+09:00']),
         ])]];
+        yield 'destination crossing midnight' => [Direction::Departure, $withFlightValue('odpt:destinationDayDifference', 1)];
+        yield 'origin on the day before' => [Direction::Departure, $withFlightValue('odpt:originDayDifference', -1)];
         yield 'day difference not an integer' => [Direction::Departure, $withFlightValue('odpt:destinationDayDifference', '1')];
         yield 'note as plain string' => [Direction::Departure, $withFlightValue('odpt:note', 'テスト用の備考')];
         yield 'note without Japanese' => [Direction::Departure, $withFlightValue('odpt:note', ['en' => 'test note'])];
