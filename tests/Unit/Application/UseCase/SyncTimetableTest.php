@@ -145,9 +145,120 @@ final class SyncTimetableTest extends TestCase
         self::assertFalse($report->isSuccessful());
         self::assertSame([], $report->notSaved);
         self::assertTrue($report->futureRecordDetected);
-        self::assertTrue($this->logger->has('error', 'Stored timetable fetch record is dated in the future.', 'departure'));
+        self::assertTrue($this->logger->has('error', 'Stored timetable fetch record is dated in the future (at the start).', 'departure'));
         self::assertTrue($this->logger->has('error', 'saved over a stored fetch record dated in the future', 'departure'));
         self::assertSame('2026-11-12T02:59:58+00:00', $this->repository->findLatest(Direction::Departure)?->requestStartedAt->format(\DATE_ATOM));
+    }
+
+    public function testRecordFutureAtTheStartButPastWhenJudgedIsReplacedByALaterFetch(): void
+    {
+        // Future at the start (03:00:00), past by the time of the save.
+        $this->repository->store(self::fetched(Direction::Departure, '2026-11-12T03:00:30Z'));
+        $this->repository->beforeJudgment(fn () => $this->clock->modify('2026-11-12T03:01:00Z'));
+        $this->respondBoth('2026-11-12T03:00:40Z');
+
+        $report = $this->sync()->execute();
+
+        self::assertTrue($report->futureRecordDetected);
+        self::assertFalse($report->isSuccessful());
+        self::assertSame([], $report->notSaved);
+        self::assertTrue($this->logger->has('error', 'dated in the future (at the start)', 'departure'));
+        // Judged normally: a later fetch replaces it, not as a future record.
+        self::assertTrue($this->logger->has('info', 'Timetable saved', 'departure'));
+        self::assertFalse($this->logger->has('error', 'saved over a stored fetch record'));
+        self::assertSame('2026-11-12T03:00:40+00:00', $this->repository->findLatest(Direction::Departure)?->requestStartedAt->format(\DATE_ATOM));
+    }
+
+    public function testRecordFutureAtTheStartButPastWhenJudgedIsKeptAgainstAnEarlierFetch(): void
+    {
+        $this->repository->store(self::fetched(Direction::Departure, '2026-11-12T03:00:30Z'));
+        $this->repository->beforeJudgment(fn () => $this->clock->modify('2026-11-12T03:01:00Z'));
+        $this->respondBoth('2026-11-12T03:00:20Z');
+
+        $report = $this->sync()->execute();
+
+        self::assertTrue($report->futureRecordDetected);
+        self::assertFalse($report->isSuccessful());
+        self::assertSame([], $report->notSaved);
+        self::assertTrue($this->logger->has('info', 'the stored fetch started later', 'departure'));
+        self::assertSame('2026-11-12T03:00:30+00:00', $this->repository->findLatest(Direction::Departure)?->requestStartedAt->format(\DATE_ATOM));
+    }
+
+    public function testRecordFutureOnlyAfterTheRunIsLoggedAndFailsTheRun(): void
+    {
+        $this->repository->store(self::fetched(Direction::Departure, '2026-11-12T02:59:00Z'));
+        // The clock is set back during the run; the fetch fails, so the
+        // stored record is kept and is now ahead of the clock.
+        $this->provider->respond(Direction::Departure, new TimetableFetchFailed('ODPT returned HTTP 503.'));
+        $this->provider->respond(Direction::Arrival, self::fetched(Direction::Arrival, '2026-11-12T02:00:00Z'));
+        $this->repository->beforeJudgment(fn () => $this->clock->modify('2026-11-12T02:30:00Z'));
+
+        $report = $this->sync()->execute();
+
+        self::assertTrue($report->futureRecordDetected);
+        self::assertTrue($this->logger->has('error', 'dated in the future (after the run)', 'departure'));
+        self::assertFalse($this->logger->has('error', 'dated in the future (at the start)'));
+    }
+
+    public function testRecordFutureAtTheStartIsNotLoggedAgainAfterTheRun(): void
+    {
+        $this->repository->store(self::fetched(Direction::Departure, '2026-11-20T00:00:00Z'));
+        $this->provider->respond(Direction::Departure, new TimetableFetchFailed('ODPT returned HTTP 503.'));
+
+        $report = $this->sync()->execute();
+
+        self::assertTrue($report->futureRecordDetected);
+        self::assertTrue($this->logger->has('error', 'dated in the future (at the start)', 'departure'));
+        self::assertFalse($this->logger->has('error', 'dated in the future (after the run)'));
+    }
+
+    public function testFailedComparisonRollsTheSaveBackAndCountsAsNotSaved(): void
+    {
+        // TEST ONLY: invalid UTF-8 can only get in by bypassing the mapper,
+        // which rejects it; the stored note makes the hash fail.
+        $stored = self::fetched(Direction::Departure, '2026-11-12T02:00:00Z', entries: [self::entry('ZZ1001', '09:00', note: "\xff")]);
+        $this->repository->store($stored);
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:59:58Z', flightNumber: 'ZZ1005'));
+
+        $report = $this->sync()->execute();
+
+        self::assertSame([Direction::Departure], $report->notSaved);
+        self::assertSame(\JsonException::class, $this->recordFor('Timetable save failed')['context']['exception']);
+        self::assertSame('ZZ1001', $this->repository->findLatest(Direction::Departure)?->entries[0]->flightNumber->value);
+        self::assertFalse($this->logger->has('notice', 'changed'));
+    }
+
+    public function testUnexpectedProviderErrorIsLoggedByClassAndTheOtherDirectionGoesOn(): void
+    {
+        $provider = new class implements TimetableProviderInterface {
+            public function fetch(Direction $direction): TimetableFetchResult
+            {
+                if (Direction::Departure === $direction) {
+                    throw new \TypeError('value ZZ1001 broke');
+                }
+
+                return SyncTimetableTest::fetched($direction, '2026-11-12T02:59:58Z');
+            }
+        };
+
+        $report = new SyncTimetable($provider, $this->repository, new StubTimetableLock(), $this->clock, self::policy(), new ComparedItemsHasher(), $this->logger)->execute();
+
+        self::assertSame([Direction::Departure], $report->notSaved);
+        self::assertSame(\TypeError::class, $this->recordFor('Timetable fetch failed')['context']['exception']);
+        self::assertStringNotContainsString('ZZ1001', implode("\n", $this->logger->lines()));
+        self::assertNotNull($this->repository->findLatest(Direction::Arrival));
+    }
+
+    public function testUnexpectedSaveErrorIsLoggedByClass(): void
+    {
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->repository->failNextSave(Direction::Departure, new \Error('broken'));
+
+        $report = $this->sync()->execute();
+
+        self::assertSame([Direction::Departure], $report->notSaved);
+        self::assertSame(\Error::class, $this->recordFor('Timetable save failed')['context']['exception']);
     }
 
     public function testInvalidThresholdsFailTheRunButDataIsStillSaved(): void
@@ -234,6 +345,8 @@ final class SyncTimetableTest extends TestCase
         $suspensions = array_filter($this->logger->records, static fn (array $r): bool => str_contains($r['message'], 'publication is suspended'));
         self::assertCount(2, $warnings);
         self::assertCount(2, $suspensions);
+        // Both are errors, told apart by the message (§7 step 7 「運営者が気づく方法」).
+        self::assertSame(['error'], array_values(array_unique(array_map(static fn (array $r): string => $r['level'], [...$warnings, ...$suspensions]))));
         self::assertSame(['departure'], array_values(array_unique(array_map(static fn (array $r): string => self::directionOf($r), $warnings))));
         self::assertSame(['arrival'], array_values(array_unique(array_map(static fn (array $r): string => self::directionOf($r), $suspensions))));
     }
@@ -296,7 +409,7 @@ final class SyncTimetableTest extends TestCase
         );
     }
 
-    private static function entry(string $flightNumber, string $originTime, Direction $direction = Direction::Departure, string $validTo = '2027-01-04'): TimetableEntry
+    private static function entry(string $flightNumber, string $originTime, Direction $direction = Direction::Departure, string $validTo = '2027-01-04', ?string $note = null): TimetableEntry
     {
         [$origin, $destination] = Direction::Departure === $direction ? ['TKN', 'ZZZ'] : ['ZZZ', 'TKN'];
 
@@ -311,7 +424,7 @@ final class SyncTimetableTest extends TestCase
             null,
             ServiceDate::fromString('2026-10-25'),
             ServiceDate::fromString($validTo),
-            null,
+            $note,
             'odpt.Operator:ZZ',
         );
     }

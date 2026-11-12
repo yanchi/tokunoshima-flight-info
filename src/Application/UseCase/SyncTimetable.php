@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Application\UseCase;
 
-use App\Application\DTO\TimetableEntry;
 use App\Application\DTO\TimetableFetchResult;
 use App\Application\Gate\ComparedItemsHasher;
 use App\Application\Gate\ComparedPeriod;
@@ -25,13 +24,17 @@ use Psr\Log\LoggerInterface;
 /**
  * Fetches and saves the timetable of both directions
  * (docs/data-source-verification.md §7 step 7). Each direction is fetched
- * outside the lock and saved inside it, so a slow API never holds the lock.
+ * and mapped outside the lock and saved inside it, so a slow API never
+ * holds the lock.
  *
- * No gate settings exist yet, so comparison (a) is not made and nothing is
- * published from here. A change against the previous fetch is only logged.
+ * The comparison with the previous fetch runs inside the save transaction
+ * (§7 step 7 「同期のトランザクション」); comparison (a) and the released state
+ * will be added there with the gate settings. Until then nothing is
+ * published from here, and a content change is only logged.
  *
- * Log messages carry directions, times and counts only: never credentials,
- * request URLs or timetable contents.
+ * Log lines carry directions, times, counts, exception classes, the fixed
+ * failure reasons of the provider and its rate limit counts: never
+ * credentials, request URLs or response values.
  */
 final readonly class SyncTimetable
 {
@@ -53,9 +56,9 @@ final readonly class SyncTimetable
             $this->logger->error('Timetable freshness thresholds are invalid; no timetable is published.');
         }
 
-        $futureRecordDetected = $this->detectFutureRecordsAtStart();
+        $futureAtStart = $this->detectFutureRecordsAtStart();
+        $futureRecordDetected = [] !== $futureAtStart;
         $notSaved = [];
-        $comparisonFailed = false;
 
         foreach (Direction::cases() as $direction) {
             $context = ['direction' => $direction->value];
@@ -66,16 +69,31 @@ final readonly class SyncTimetable
                 $this->logger->error('Timetable fetch failed: {reason}', $context + ['reason' => $e->getMessage()]);
                 $notSaved[] = $direction;
                 continue;
+            } catch (\Throwable $e) {
+                // The class only: an unexpected message may quote anything.
+                $this->logger->error('Timetable fetch failed ({exception}).', $context + ['exception' => $e::class]);
+                $notSaved[] = $direction;
+                continue;
             }
 
+            $changes = [];
             try {
-                $saved = $this->lock->runExclusively(fn (): TimetableSaveResult => $this->repository->save($fetched));
+                // Not an arrow function: it would capture $changes by value,
+                // and the comparison result would never reach this scope.
+                $saved = $this->lock->runExclusively(function () use ($fetched, &$changes): TimetableSaveResult {
+                    return $this->repository->save(
+                        $fetched,
+                        function (?TimetableFetchResult $previous) use ($fetched, &$changes): void {
+                            $changes = null === $previous ? [] : $this->changesSince($previous, $fetched);
+                        },
+                    );
+                });
             } catch (TimetableLockUnavailable) {
                 $this->logger->error('Timetable save skipped: the lock is held by another process.', $context);
                 $notSaved[] = $direction;
                 continue;
-            } catch (\Exception $e) {
-                // The exception class only: driver messages may quote row values.
+            } catch (\Throwable $e) {
+                // The class only: driver messages may quote row values.
                 $this->logger->error('Timetable save failed ({exception}).', $context + ['exception' => $e::class]);
                 $notSaved[] = $direction;
                 continue;
@@ -109,31 +127,33 @@ final readonly class SyncTimetable
             }
 
             if ($saved->outcome->replaced() && null !== $saved->previous) {
-                $comparisonFailed = !$this->logChanges($saved->previous, $fetched, $context) || $comparisonFailed;
+                $this->logChanges($changes, $saved->previous, $fetched, $context);
             }
         }
 
-        $futureRecordDetected = $this->logFreshness() || $futureRecordDetected;
+        $futureRecordDetected = $this->logFreshness($futureAtStart) || $futureRecordDetected;
 
-        return new TimetableSyncReport($notSaved, $thresholdsInvalid, $futureRecordDetected, $comparisonFailed);
+        return new TimetableSyncReport($notSaved, $thresholdsInvalid, $futureRecordDetected);
     }
 
     /**
-     * A stored record later than the start of the run (§7 step 7 (3)).
+     * Stored records later than the start of the run (§7 step 7 (3)).
+     *
+     * @return list<Direction>
      */
-    private function detectFutureRecordsAtStart(): bool
+    private function detectFutureRecordsAtStart(): array
     {
         $now = $this->clock->now();
-        $detected = false;
+        $detected = [];
         foreach (Direction::cases() as $direction) {
             $stored = $this->repository->findLatest($direction);
             if (null !== $stored && $stored->requestStartedAt > $now) {
-                $this->logger->error('Stored timetable fetch record is dated in the future.', [
+                $this->logger->error('Stored timetable fetch record is dated in the future (at the start).', [
                     'direction' => $direction->value,
                     'stored_started_at' => self::format($stored->requestStartedAt),
                     'now' => self::format($now),
                 ]);
-                $detected = true;
+                $detected[] = $direction;
             }
         }
 
@@ -141,48 +161,61 @@ final readonly class SyncTimetable
     }
 
     /**
-     * Logs a changed dc:date and changed content against the replaced fetch.
-     * The content is compared by hashing both over a period that covers
-     * every entry of either, with the same hasher as the gate, so nothing is
-     * cut away (§7 step 7, comparison (b), option A).
+     * What changed against the replaced fetch. Content is compared by
+     * hashing both over a period that holds every entry of either whole,
+     * with the same hasher as the gate, so nothing is cut away (§7 step 7,
+     * comparison (b), option A). The mapper has proved both fetches
+     * hashable before they were saved; a failure here still rolls the save
+     * back.
      *
-     * @param array<string, mixed> $context
+     * @return list<'data_date'|'content'>
      *
-     * @return bool false when the content could not be compared
+     * @throws \JsonException
      */
-    private function logChanges(TimetableFetchResult $previous, TimetableFetchResult $current, array $context): bool
+    private function changesSince(TimetableFetchResult $previous, TimetableFetchResult $current): array
     {
+        $changes = [];
         if ($previous->latestDataDate != $current->latestDataDate) {
+            $changes[] = 'data_date';
+        }
+
+        $span = ComparedPeriod::covering([...$previous->entries, ...$current->entries]);
+        if (null !== $span && $this->hasher->hash($span, $previous->entries) !== $this->hasher->hash($span, $current->entries)) {
+            $changes[] = 'content';
+        }
+
+        return $changes;
+    }
+
+    /**
+     * Logged only after the save has been committed.
+     *
+     * @param list<'data_date'|'content'> $changes
+     * @param array<string, mixed>        $context
+     */
+    private function logChanges(array $changes, TimetableFetchResult $previous, TimetableFetchResult $current, array $context): void
+    {
+        if (\in_array('data_date', $changes, true)) {
             $this->logger->notice('Timetable dc:date changed; compare with the official timetable again.', $context + [
                 'previous_data_date' => self::format($previous->latestDataDate),
                 'data_date' => self::format($current->latestDataDate),
             ]);
         }
-
-        $span = self::span([...$previous->entries, ...$current->entries]);
-        try {
-            $changed = null !== $span
-                && $this->hasher->hash($span, $previous->entries) !== $this->hasher->hash($span, $current->entries);
-        } catch (\JsonException $e) {
-            $this->logger->error('Timetable could not be compared with the previous fetch ({exception}).', $context + ['exception' => $e::class]);
-
-            return false;
+        if (\in_array('content', $changes, true)) {
+            // Without gate settings, (a) and (b) cannot be told apart yet.
+            $this->logger->notice('Timetable content changed since the previous fetch (no compared period is set).', $context);
         }
-
-        if ($changed) {
-            $this->logger->notice('Timetable content changed since the previous fetch.', $context);
-        }
-
-        return true;
     }
 
     /**
      * Logs every direction whose stored timetable is past a threshold, on
      * every run while it lasts (§7 step 7 「運営者が気づく方法」).
      *
+     * @param list<Direction> $futureAtStart already logged at the start
+     *
      * @return bool whether a stored record is dated in the future
      */
-    private function logFreshness(): bool
+    private function logFreshness(array $futureAtStart): bool
     {
         $now = $this->clock->now();
         $futureDetected = false;
@@ -197,35 +230,28 @@ final readonly class SyncTimetable
                 'stored_started_at' => self::format($stored->requestStartedAt),
                 'now' => self::format($now),
             ];
-            match ($this->freshnessPolicy->judge($stored->requestStartedAt, $now)) {
-                TimetableFreshness::Warning => $this->logger->error('Timetable is past the warning threshold.', $context),
-                TimetableFreshness::Suspended => $this->logger->error('Timetable publication is suspended: past the stop-publishing threshold.', $context),
-                TimetableFreshness::FutureDated => $futureDetected = true,
-                // Invalid thresholds are logged once at the start.
-                TimetableFreshness::Fresh, TimetableFreshness::InvalidThresholds => null,
-            };
+            switch ($this->freshnessPolicy->judge($stored->requestStartedAt, $now)) {
+                case TimetableFreshness::Warning:
+                    $this->logger->error('Timetable is past the warning threshold.', $context);
+                    break;
+                case TimetableFreshness::Suspended:
+                    $this->logger->error('Timetable publication is suspended: past the stop-publishing threshold.', $context);
+                    break;
+                case TimetableFreshness::FutureDated:
+                    // E.g. the clock was set back during the run.
+                    if (!\in_array($direction, $futureAtStart, true)) {
+                        $this->logger->error('Stored timetable fetch record is dated in the future (after the run).', $context);
+                    }
+                    $futureDetected = true;
+                    break;
+                case TimetableFreshness::Fresh:
+                case TimetableFreshness::InvalidThresholds:
+                    // Invalid thresholds are logged once at the start.
+                    break;
+            }
         }
 
         return $futureDetected;
-    }
-
-    /**
-     * @param list<TimetableEntry> $entries
-     */
-    private static function span(array $entries): ?ComparedPeriod
-    {
-        if ([] === $entries) {
-            return null;
-        }
-
-        $from = $entries[0]->validFrom;
-        $to = $entries[0]->validTo;
-        foreach ($entries as $entry) {
-            $from = $entry->validFrom->compareTo($from) < 0 ? $entry->validFrom : $from;
-            $to = $entry->validTo->compareTo($to) > 0 ? $entry->validTo : $to;
-        }
-
-        return new ComparedPeriod($from, $to);
     }
 
     private static function format(\DateTimeInterface $time): string

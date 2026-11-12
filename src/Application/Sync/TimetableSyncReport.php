@@ -16,13 +16,11 @@ final readonly class TimetableSyncReport
      * @param list<Direction> $notSaved             (1) directions whose fetch could not be saved
      * @param bool            $thresholdsInvalid    (2)
      * @param bool            $futureRecordDetected (3) at the start, when judged, or after the run
-     * @param bool            $comparisonFailed     the saved data could not be compared with the previous fetch
      */
     public function __construct(
         public array $notSaved,
         public bool $thresholdsInvalid,
         public bool $futureRecordDetected,
-        public bool $comparisonFailed,
     ) {
     }
 
@@ -30,7 +28,6 @@ final readonly class TimetableSyncReport
     {
         return [] === $this->notSaved
             && !$this->thresholdsInvalid
-            && !$this->futureRecordDetected
-            && !$this->comparisonFailed;
+            && !$this->futureRecordDetected;
     }
 }

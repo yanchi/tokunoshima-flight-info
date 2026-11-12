@@ -6,6 +6,8 @@ namespace App\Infrastructure\Provider\Odpt;
 
 use App\Application\DTO\TimetableEntry;
 use App\Application\DTO\TimetableFetchResult;
+use App\Application\Gate\ComparedItemsHasher;
+use App\Application\Gate\ComparedPeriod;
 use App\Application\Port\TimetableFetchFailed;
 use App\Domain\Flight\AirportCode;
 use App\Domain\Flight\Direction;
@@ -21,6 +23,13 @@ use App\Domain\Flight\Weekday;
  */
 final class OdptTimetableMapper
 {
+    private ComparedItemsHasher $hasher;
+
+    public function __construct(?ComparedItemsHasher $hasher = null)
+    {
+        $this->hasher = $hasher ?? new ComparedItemsHasher();
+    }
+
     /** Static data responses are capped at 1000 records (§1 FAQ). */
     public const RECORD_LIMIT = 1000;
 
@@ -117,6 +126,17 @@ final class OdptTimetableMapper
 
         if ([] === $entries) {
             throw $this->fail($direction, 'response has no flights');
+        }
+
+        // Saved data must always be hashable, so the gate and the comparison
+        // with the previous fetch can never fail on it (§7 step 7). Hashed
+        // over the whole span, with the same hasher, so nothing is cut away.
+        $span = ComparedPeriod::covering($entries);
+        \assert(null !== $span);
+        try {
+            $this->hasher->hash($span, $entries);
+        } catch (\JsonException) {
+            throw $this->fail($direction, 'compared items cannot be hashed');
         }
 
         return new TimetableFetchResult(

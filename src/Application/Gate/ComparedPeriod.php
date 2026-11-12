@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\Gate;
 
+use App\Application\DTO\TimetableEntry;
 use App\Domain\Flight\ServiceDate;
 
 /**
@@ -20,6 +21,28 @@ final readonly class ComparedPeriod
         if ($from->compareTo($to) > 0) {
             throw new \InvalidArgumentException(\sprintf('Compared period starts after it ends: %s to %s.', $from->toString(), $to->toString()));
         }
+    }
+
+    /**
+     * The smallest period that holds every entry's valid days whole, or
+     * null when there are no entries.
+     *
+     * @param list<TimetableEntry> $entries
+     */
+    public static function covering(array $entries): ?self
+    {
+        if ([] === $entries) {
+            return null;
+        }
+
+        $from = $entries[0]->validFrom;
+        $to = $entries[0]->validTo;
+        foreach ($entries as $entry) {
+            $from = $entry->validFrom->compareTo($from) < 0 ? $entry->validFrom : $from;
+            $to = $entry->validTo->compareTo($to) > 0 ? $entry->validTo : $to;
+        }
+
+        return new self($from, $to);
     }
 
     /**

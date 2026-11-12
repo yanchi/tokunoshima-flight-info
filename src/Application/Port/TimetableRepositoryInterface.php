@@ -28,9 +28,15 @@ interface TimetableRepositoryInterface
      * A failed save leaves the stored data unchanged and the repository
      * usable for the next save.
      *
-     * @throws \Exception when the stored data cannot be read or written
+     * @param (callable(?TimetableFetchResult): void)|null $whenReplaced runs inside the
+     *                                                                   transaction after the replacement is written and before it is
+     *                                                                   committed, with the replaced fetch (null for the first one).
+     *                                                                   Not called when nothing is replaced. Whatever it throws rolls
+     *                                                                   the whole save back (§7 step 7 「同期のトランザクション」)
+     *
+     * @throws \Throwable when the stored data cannot be read or written, or $whenReplaced throws
      */
-    public function save(TimetableFetchResult $result): TimetableSaveResult;
+    public function save(TimetableFetchResult $result, ?callable $whenReplaced = null): TimetableSaveResult;
 
     /**
      * The stored timetable for the direction, or null when no fetch has been

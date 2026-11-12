@@ -193,7 +193,7 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
         $newer = self::departures('2026-11-12T05:00:00Z', [
             self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
         ]);
-        self::assertSame(TimetableSaveOutcome::Saved, new DoctrineTimetableRepository($otherEntityManager, new MockClock(self::NOW))->save($newer)->outcome);
+        self::assertSame(TimetableSaveOutcome::Saved, new DoctrineTimetableRepository($otherEntityManager, new MockClock(self::NOW), self::getContainer()->get('doctrine'))->save($newer)->outcome);
         $otherConnection->close();
 
         // No clear(): the stale managed record must not be trusted.
@@ -254,6 +254,64 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
         self::assertSame(self::described($stored), self::described($this->latest(Direction::Departure)));
         $arrivals = self::arrivals('2026-11-12T04:00:00Z');
         self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($arrivals)->outcome);
+    }
+
+    public function testCallbackRunsInsideTheTransactionWithThePreviousFetch(): void
+    {
+        $stored = self::departures('2026-11-12T03:00:00Z');
+        $this->repository->save($stored);
+
+        $seen = [];
+        $connection = $this->entityManager->getConnection();
+        $this->repository->save(self::departures('2026-11-12T04:00:00Z'), static function (?TimetableFetchResult $previous) use (&$seen, $connection): void {
+            $seen[] = [$previous, $connection->isTransactionActive()];
+        });
+
+        self::assertCount(1, $seen);
+        self::assertNotNull($seen[0][0]);
+        self::assertSame(self::described($stored), self::described($seen[0][0]));
+        self::assertTrue($seen[0][1]);
+    }
+
+    public function testCallbackGetsNullForTheFirstFetch(): void
+    {
+        $seen = [];
+        $this->repository->save(self::departures('2026-11-12T03:00:00Z'), static function (?TimetableFetchResult $previous) use (&$seen): void {
+            $seen[] = $previous;
+        });
+
+        self::assertSame([null], $seen);
+    }
+
+    public function testCallbackIsNotCalledWhenNothingIsReplaced(): void
+    {
+        $this->repository->save(self::departures('2026-11-12T04:00:00Z'));
+
+        $called = false;
+        $this->repository->save(self::departures('2026-11-12T03:00:00Z'), static function () use (&$called): void {
+            $called = true;
+        });
+
+        self::assertFalse($called);
+    }
+
+    public function testThrowingCallbackRollsTheReplacementBack(): void
+    {
+        $stored = self::departures('2026-11-12T03:00:00Z');
+        $this->repository->save($stored);
+
+        try {
+            $this->repository->save(self::departures('2026-11-12T04:00:00Z', [
+                self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
+            ]), static function (): void {
+                throw new \JsonException('TEST ONLY');
+            });
+            self::fail('The save should have failed.');
+        } catch (\JsonException) {
+        }
+
+        self::assertSame(self::described($stored), self::described($this->latest(Direction::Departure)));
+        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save(self::arrivals('2026-11-12T04:00:00Z'))->outcome);
     }
 
     public function testFirstSaveHasNoPreviousFetchAndIsJudgedAtTheClockTime(): void

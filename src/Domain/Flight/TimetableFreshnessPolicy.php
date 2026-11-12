@@ -43,8 +43,8 @@ final readonly class TimetableFreshnessPolicy
     }
 
     /**
-     * Elapsed seconds are compared, not JST calendar days. An age equal to
-     * a threshold is still within it.
+     * Elapsed time is compared, not JST calendar days, including fractions
+     * of a second. An age equal to a threshold is still within it.
      */
     public function judge(\DateTimeInterface $fetchedAt, \DateTimeInterface $now): TimetableFreshness
     {
@@ -58,11 +58,13 @@ final readonly class TimetableFreshnessPolicy
             return TimetableFreshness::FutureDated;
         }
 
-        $age = $now->getTimestamp() - $fetchedAt->getTimestamp();
+        // Sub-seconds count: rounding now down would make the age look up
+        // to a second younger and delay the warning and the stop (§7 step 7).
+        $fetched = \DateTimeImmutable::createFromInterface($fetchedAt);
 
         return match (true) {
-            $age > $this->suspendAfterSeconds => TimetableFreshness::Suspended,
-            $age > $this->warnAfterSeconds => TimetableFreshness::Warning,
+            $now > $fetched->modify(\sprintf('+%d seconds', $this->suspendAfterSeconds)) => TimetableFreshness::Suspended,
+            $now > $fetched->modify(\sprintf('+%d seconds', $this->warnAfterSeconds)) => TimetableFreshness::Warning,
             default => TimetableFreshness::Fresh,
         };
     }

@@ -57,8 +57,8 @@ when@prod:
             console:
                 type: console
                 process_psr_3_messages: false
-                # Already written to stderr above.
-                channels: ["!event", "!doctrine", "!timetable_sync"]
+                # Both are already written to stderr above.
+                channels: ["!event", "!doctrine", "!timetable_sync", "!deprecation"]
             deprecation:
                 type: stream
                 channels: [deprecation]

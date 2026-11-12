@@ -19,7 +19,7 @@ final class InMemoryTimetableRepository implements TimetableRepositoryInterface
     /** @var array<string, TimetableFetchResult> */
     private array $stored = [];
 
-    /** @var array<string, \Exception> */
+    /** @var array<string, \Throwable> */
     private array $failures = [];
 
     /** @var list<bool> whether the watched lock was held, per save */
@@ -29,6 +29,20 @@ final class InMemoryTimetableRepository implements TimetableRepositoryInterface
 
     public function __construct(private readonly ClockInterface $clock)
     {
+    }
+
+    /** @var (\Closure(): void)|null */
+    private ?\Closure $beforeJudgment = null;
+
+    /**
+     * Runs right before each judgment, e.g. to move the clock between the
+     * start of the run and the save.
+     *
+     * @param \Closure(): void $hook
+     */
+    public function beforeJudgment(\Closure $hook): void
+    {
+        $this->beforeJudgment = $hook;
     }
 
     public function watchLock(StubTimetableLock $lock): void
@@ -41,12 +55,12 @@ final class InMemoryTimetableRepository implements TimetableRepositoryInterface
         $this->stored[$result->direction->value] = self::asStored($result);
     }
 
-    public function failNextSave(Direction $direction, \Exception $exception): void
+    public function failNextSave(Direction $direction, \Throwable $exception): void
     {
         $this->failures[$direction->value] = $exception;
     }
 
-    public function save(TimetableFetchResult $result): TimetableSaveResult
+    public function save(TimetableFetchResult $result, ?callable $whenReplaced = null): TimetableSaveResult
     {
         if (null !== $this->watchedLock) {
             $this->lockedDuringSave[] = $this->watchedLock->held;
@@ -58,9 +72,16 @@ final class InMemoryTimetableRepository implements TimetableRepositoryInterface
         }
 
         $previous = $this->stored[$result->direction->value] ?? null;
+        if (null !== $this->beforeJudgment) {
+            ($this->beforeJudgment)();
+        }
         $now = $this->clock->now();
         $outcome = TimetableReplacementRule::decide($result->storedRequestStartedAt(), $previous?->requestStartedAt, $now);
         if ($outcome->replaced()) {
+            // Like a rollback: nothing is stored when the callback throws.
+            if (null !== $whenReplaced) {
+                $whenReplaced($previous);
+            }
             $this->store($result);
         }
 

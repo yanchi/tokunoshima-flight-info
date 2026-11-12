@@ -15,6 +15,9 @@
         <ini name="error_reporting" value="-1" />
         <server name="APP_ENV" value="test" force="true" />
         <server name="SHELL_VERBOSITY" value="-1" />
+        <!-- Never a real key in tests, even if one is exported (CLAUDE.md §9). -->
+        <env name="ODPT_CONSUMER_KEY" value="" force="true" />
+        <server name="ODPT_CONSUMER_KEY" value="" force="true" />
     </php>
 
     <testsuites>

@@ -25,16 +25,16 @@ final readonly class DoctrineTimetableRepository implements TimetableRepositoryI
     public function __construct(
         private EntityManagerInterface $entityManager,
         private ClockInterface $clock,
-        private ?ManagerRegistry $registry = null,
+        private ManagerRegistry $registry,
     ) {
     }
 
-    public function save(TimetableFetchResult $result): TimetableSaveResult
+    public function save(TimetableFetchResult $result, ?callable $whenReplaced = null): TimetableSaveResult
     {
         $requestStartedAt = $result->storedRequestStartedAt();
 
         try {
-            return $this->entityManager->wrapInTransaction(function (EntityManagerInterface $em) use ($result, $requestStartedAt): TimetableSaveResult {
+            return $this->entityManager->wrapInTransaction(function (EntityManagerInterface $em) use ($result, $requestStartedAt, $whenReplaced): TimetableSaveResult {
                 $record = $em->find(TimetableFetchRecord::class, $result->direction);
                 // find() returns an already managed record without a query, so
                 // another process's newer save would go unseen. Re-read it inside
@@ -71,6 +71,9 @@ final readonly class DoctrineTimetableRepository implements TimetableRepositoryI
                 }
 
                 $em->flush();
+                if (null !== $whenReplaced) {
+                    $whenReplaced($previous);
+                }
                 // Rows are only snapshots for the DTO; keeping them managed would
                 // pile up in a long-running process.
                 foreach ($flights as $flight) {
@@ -82,7 +85,7 @@ final readonly class DoctrineTimetableRepository implements TimetableRepositoryI
         } catch (\Throwable $e) {
             // A failed transaction closes the entity manager. Reset it so the
             // other direction can still be saved in the same run.
-            if (null !== $this->registry && !$this->entityManager->isOpen()) {
+            if (!$this->entityManager->isOpen()) {
                 $this->registry->resetManager();
             }
 

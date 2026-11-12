@@ -15,6 +15,8 @@ parameters:
     # (docs/data-source-verification.md §7 step 7). Never use env(int:...) here.
     env(TIMETABLE_WARN_AFTER_SECONDS): ''
     env(TIMETABLE_SUSPEND_AFTER_SECONDS): ''
+    # Same value as .env, so the lock works without a .env file.
+    env(LOCK_DSN): 'flock'
 
 services:
     # default configuration for services in *this* file
@@ -65,6 +67,10 @@ services:
         arguments:
             $logger: '@monolog.logger.timetable_sync'
 
+    App\Infrastructure\Lock\SymfonyTimetableLock:
+        arguments:
+            $logger: '@monolog.logger.timetable_sync'
+
     App\Application\Port\TimetableProviderInterface:
         alias: App\Infrastructure\Provider\Odpt\OdptTimetableProvider
 
@@ -75,8 +81,17 @@ services:
 
 when@test:
     services:
-        # Test-only handle: nothing uses the client yet, so the compiled
-        # test container would drop it and the wiring test could not reach it.
+        # No test may reach the real API, whatever key is in the environment
+        # (CLAUDE.md §9): without a key the client refuses before any request
+        # (OdptTimetableClientTest). The HTTP client itself stays the
+        # production one, so OdptHttpClientWiringTest still checks it.
+        App\Infrastructure\Provider\Odpt\OdptTimetableClient:
+            autowire: true
+            arguments:
+                $httpClient: '@odpt.http_client'
+                $consumerKey: ''
+                $logger: '@monolog.logger.timetable_sync'
+        # Test-only handles, so the tests can reach these private services.
         test.odpt_timetable_client:
             alias: App\Infrastructure\Provider\Odpt\OdptTimetableClient
             public: true
