@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace DoctrineMigrations;
 
+use Doctrine\DBAL\Platforms\SQLitePlatform;
 use Doctrine\DBAL\Schema\Schema;
 use Doctrine\Migrations\AbstractMigration;
 
@@ -16,13 +17,17 @@ final class Version20261112045922 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
+        $this->abortIfNotSqlite();
+
         // The conversion below assumes UTC instants of 00:00:00 (from) and
         // 23:59:59 (to) JST. The old mapper accepted any +09:00 time, so
         // rows that the new definition would reject stop the migration
         // instead of being rounded to a day (§7 step 7).
-        $unexpected = (int) $this->connection->fetchOne(<<<'SQL'
+        // IS NOT also counts values time() cannot read (NULL). The table
+        // check keeps --dry-run / --write-sql working on an empty database.
+        $unexpected = !$this->connection->createSchemaManager()->tablesExist(['timetable_flight']) ? 0 : (int) $this->connection->fetchOne(<<<'SQL'
             SELECT COUNT(*) FROM timetable_flight
-            WHERE time(valid_from) <> '15:00:00' OR time(valid_to) <> '14:59:59'
+            WHERE time(valid_from) IS NOT '15:00:00' OR time(valid_to) IS NOT '14:59:59'
         SQL);
         $this->abortIf(
             $unexpected > 0,
@@ -61,6 +66,8 @@ final class Version20261112045922 extends AbstractMigration
 
     public function down(Schema $schema): void
     {
+        $this->abortIfNotSqlite();
+
         // Back to the UTC instants of 00:00:00 and 23:59:59 JST.
         $this->addSql('CREATE TEMPORARY TABLE __temp__timetable_flight AS SELECT id, direction, flight_number, origin_airport, destination_airport, weekday, origin_time, destination_time, origin_day_difference, destination_day_difference, valid_from, valid_to, note, airline FROM timetable_flight');
         $this->addSql('DROP TABLE timetable_flight');
@@ -89,5 +96,16 @@ final class Version20261112045922 extends AbstractMigration
         SQL);
         $this->addSql('DROP TABLE __temp__timetable_flight');
         $this->addSql('CREATE INDEX idx_timetable_flight_direction ON timetable_flight (direction)');
+    }
+
+    /**
+     * The table rebuild and date() / time() calls are SQLite only.
+     */
+    private function abortIfNotSqlite(): void
+    {
+        $this->abortIf(
+            !$this->connection->getDatabasePlatform() instanceof SQLitePlatform,
+            'This migration is written for SQLite only.',
+        );
     }
 }
