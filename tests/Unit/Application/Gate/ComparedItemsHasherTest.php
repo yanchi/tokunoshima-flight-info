@@ -172,6 +172,21 @@ final class ComparedItemsHasherTest extends TestCase
         self::assertNotSame($hasher->hash(self::period(), [self::entry()]), $hasher->hash(self::period(), [$changed]));
     }
 
+    public function testSplittingAnEntryWithTheSameContentChangesTheHash(): void
+    {
+        $hasher = new ComparedItemsHasher();
+
+        // Operator decision 2026-11-12: the same flights split into two
+        // adjacent periods is change (a), accepted as the safe side.
+        self::assertNotSame(
+            $hasher->hash(self::period(), [self::entry(validFrom: '2026-10-25', validTo: '2027-01-04')]),
+            $hasher->hash(self::period(), [
+                self::entry(validFrom: '2026-10-25', validTo: '2026-11-15'),
+                self::entry(validFrom: '2026-11-16', validTo: '2027-01-04'),
+            ]),
+        );
+    }
+
     public function testNotesThatDifferOnlyInUnicodeNormalisationDiffer(): void
     {
         $hasher = new ComparedItemsHasher();
@@ -196,9 +211,6 @@ final class ComparedItemsHasherTest extends TestCase
         return new ComparedPeriod(ServiceDate::fromString('2026-11-01'), ServiceDate::fromString('2026-11-30'));
     }
 
-    /**
-     * @return list<TimetableEntry>
-     */
     /**
      * Covers every weekday and notes with characters that JSON escapes or
      * that optional json_encode flags would change (quote, backslash,
