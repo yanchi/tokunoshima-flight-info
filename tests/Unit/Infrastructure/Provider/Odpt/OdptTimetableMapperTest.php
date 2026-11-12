@@ -113,16 +113,6 @@ final class OdptTimetableMapperTest extends TestCase
         self::assertCount(1, $result->entries);
     }
 
-    public function testAcceptsUtcOffsetWrittenAsZ(): void
-    {
-        $record = FictionalOdptTimetable::arrivalRecord();
-        $record['dc:date'] = '2026-08-21T04:00:00Z';
-
-        $result = $this->mapper->map(Direction::Arrival, [$record], new \DateTimeImmutable());
-
-        self::assertSame('2026-08-21T13:00:00+09:00', $result->latestDataDate->setTimezone(new \DateTimeZone('Asia/Tokyo'))->format(\DATE_ATOM));
-    }
-
     public function testConsecutivePeriodsOfOneFlightAreAllowed(): void
     {
         $until = FictionalOdptTimetable::flight('ZZ1002', '10:30', '11:10');
@@ -174,7 +164,9 @@ final class OdptTimetableMapperTest extends TestCase
         yield 'dc:date without time zone' => [Direction::Departure, $withRecord('dc:date', '2026-08-21T13:00:00')];
         yield 'dc:date overflowing' => [Direction::Departure, $withRecord('dc:date', '2026-02-30T13:00:00+09:00')];
         yield 'dc:date offset out of range' => [Direction::Departure, $withRecord('dc:date', '2026-08-21T13:00:00+99:99')];
-        yield 'dc:date offset other than JST or UTC' => [Direction::Departure, $withRecord('dc:date', '2026-08-21T13:00:00-05:00')];
+        yield 'dc:date offset other than JST' => [Direction::Departure, $withRecord('dc:date', '2026-08-21T13:00:00-05:00')];
+        yield 'dc:date in UTC' => [Direction::Departure, $withRecord('dc:date', '2026-08-21T04:00:00Z')];
+        yield 'dc:date with fractional seconds' => [Direction::Departure, $withRecord('dc:date', '2026-08-21T13:00:00.000+09:00')];
         yield 'dc:date trailing newline' => [Direction::Departure, $withRecord('dc:date', "2026-08-21T13:00:00+09:00\n")];
         yield 'origin airport invalid' => [Direction::Departure, $withRecord('odpt:originAirport', 'odpt.Airport:tkn')];
         yield 'destination airport missing' => [Direction::Departure, $withoutRecord('odpt:destinationAirport')];

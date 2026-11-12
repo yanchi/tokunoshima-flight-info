@@ -36,7 +36,9 @@ services:
         class: Symfony\Contracts\HttpClient\HttpClientInterface
         factory: ['Symfony\Component\HttpClient\HttpClient', 'create']
         arguments: [{ max_redirects: 0 }]
-        # Autoconfiguration adds setLogger() to LoggerAware services.
+        # The declared class is an interface, so autoconfiguration's
+        # LoggerAware rule does not match today. Kept as a safeguard in
+        # case the class is changed to a concrete client.
         autoconfigure: false
 
     App\Infrastructure\Provider\Odpt\OdptTimetableClient:
@@ -54,8 +56,8 @@ services:
 
 when@test:
     services:
-        # Nothing uses the provider yet, so without this the compiled test
-        # container drops it and the wiring test cannot reach it.
-        App\Application\Port\TimetableProviderInterface:
-            alias: App\Infrastructure\Provider\Odpt\OdptTimetableProvider
+        # Test-only handle: nothing uses the client yet, so the compiled
+        # test container would drop it and the wiring test could not reach it.
+        test.odpt_timetable_client:
+            alias: App\Infrastructure\Provider\Odpt\OdptTimetableClient
             public: true

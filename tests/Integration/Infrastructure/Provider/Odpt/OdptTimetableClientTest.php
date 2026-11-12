@@ -57,7 +57,7 @@ final class OdptTimetableClientTest extends TestCase
     public function testDoesNotCallTheApiWithoutAKey(): void
     {
         $http = new MockHttpClient([]);
-        $client = new OdptTimetableClient($http, '', new NullLogger(), 0);
+        $client = new OdptTimetableClient($http, '', new NullLogger(), new MockClock(), 0);
 
         try {
             $client->fetch(Direction::Departure);
@@ -83,7 +83,7 @@ final class OdptTimetableClientTest extends TestCase
     {
         $http = new MockHttpClient([new MockResponse('Invalid acl:consumerKey.', ['http_code' => $status])]);
 
-        $this->expectFailure(new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0), \sprintf('returned HTTP %d', $status));
+        $this->expectFailure(new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), new MockClock(), 0), \sprintf('returned HTTP %d', $status));
         self::assertSame(1, $http->getRequestsCount());
     }
 
@@ -94,7 +94,7 @@ final class OdptTimetableClientTest extends TestCase
             new MockResponse('[]'),
         ]);
 
-        $body = new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0)->fetch(Direction::Departure);
+        $body = new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), new MockClock(), 0)->fetch(Direction::Departure);
 
         self::assertSame([], $body);
         self::assertSame(2, $http->getRequestsCount());
@@ -104,7 +104,7 @@ final class OdptTimetableClientTest extends TestCase
     {
         $http = new MockHttpClient(array_fill(0, 5, new MockResponse('', ['http_code' => 503])));
 
-        $this->expectFailure(new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0), 'returned HTTP 503');
+        $this->expectFailure(new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), new MockClock(), 0), 'returned HTTP 503');
         self::assertSame(4, $http->getRequestsCount());
     }
 
@@ -117,43 +117,52 @@ final class OdptTimetableClientTest extends TestCase
             new MockResponse('[]'),
         ]);
 
-        $body = new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0)->fetch(Direction::Departure);
+        $body = new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), new MockClock(), 0)->fetch(Direction::Departure);
 
         self::assertSame([], $body);
         self::assertSame(4, $http->getRequestsCount());
     }
 
-    public function testShortRetryAfterIsHonoured(): void
+    public function testUnreadableRetryAfterFallsBackToOwnBackoff(): void
     {
         $http = new MockHttpClient([
-            new MockResponse('', ['http_code' => 429, 'response_headers' => ['Retry-After: 0']]),
+            new MockResponse('', ['http_code' => 429, 'response_headers' => ['Retry-After: abc']]),
             new MockResponse('[]'),
         ]);
 
-        new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0)->fetch(Direction::Departure);
+        new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), new MockClock(), 0)->fetch(Direction::Departure);
 
         self::assertSame(2, $http->getRequestsCount());
     }
 
     /**
-     * @return iterable<string, array{string}>
+     * Values that RetryableHttpClient would wait for 0 ms or longer than
+     * the cap. The accepted range (more than 0, at most 20 s) is covered
+     * by OdptRetryStrategyTest, so no test here actually sleeps.
+     *
+     * @return iterable<string, array{int, string}>
      */
-    public static function longRetryAfters(): iterable
+    public static function rejectedRetryAfters(): iterable
     {
-        yield 'seconds' => ['3600'];
-        yield 'just over the cap' => ['61'];
-        yield 'HTTP date' => [gmdate('D, d M Y H:i:s', time() + 3600).' GMT'];
+        yield 'zero' => [429, '0'];
+        yield 'negative' => [429, '-5'];
+        yield 'just over the cap' => [429, '21'];
+        yield 'one hour' => [429, '3600'];
+        yield 'HTTP date in one hour' => [429, 'Thu, 12 Nov 2026 01:00:00 GMT'];
+        yield 'HTTP date in the past' => [429, 'Wed, 11 Nov 2026 23:00:00 GMT'];
+        yield 'on a server error' => [503, '3600'];
     }
 
-    #[DataProvider('longRetryAfters')]
-    public function testLongRetryAfterFailsInsteadOfWaiting(string $retryAfter): void
+    #[DataProvider('rejectedRetryAfters')]
+    public function testRejectedRetryAfterFailsWithoutRetrying(int $status, string $retryAfter): void
     {
         $http = new MockHttpClient([
-            new MockResponse('', ['http_code' => 429, 'response_headers' => ['Retry-After: '.$retryAfter]]),
+            new MockResponse('', ['http_code' => $status, 'response_headers' => ['Retry-After: '.$retryAfter]]),
             new MockResponse('[]'),
         ]);
+        $clock = new MockClock('2026-11-12T00:00:00+00:00');
 
-        $this->expectFailure(new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0), 'returned HTTP 429');
+        $this->expectFailure(new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), $clock, 0), \sprintf('returned HTTP %d', $status));
         self::assertSame(1, $http->getRequestsCount());
     }
 
@@ -174,7 +183,7 @@ final class OdptTimetableClientTest extends TestCase
             'X-RateLimit-Remaining-day: 23999',
         ]]));
 
-        new OdptTimetableClient($http, self::TEST_KEY, $logger, 0)->fetch(Direction::Arrival);
+        new OdptTimetableClient($http, self::TEST_KEY, $logger, new MockClock(), 0)->fetch(Direction::Arrival);
 
         self::assertCount(1, $logger->lines);
         self::assertStringContainsString('"minute":"59"', $logger->lines[0]);
@@ -190,7 +199,7 @@ final class OdptTimetableClientTest extends TestCase
             new MockResponse('[]'),
         ]);
 
-        $this->expectFailure(new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0), 'failed before a response');
+        $this->expectFailure(new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), new MockClock(), 0), 'failed or timed out');
         self::assertSame(1, $http->getRequestsCount());
     }
 
@@ -209,7 +218,7 @@ final class OdptTimetableClientTest extends TestCase
             return new MockResponse((string) json_encode([FictionalOdptTimetable::departureRecord()]));
         });
         $provider = new OdptTimetableProvider(
-            new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0),
+            new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), $clock, 0),
             new OdptTimetableMapper(),
             $clock,
         );
@@ -222,7 +231,7 @@ final class OdptTimetableClientTest extends TestCase
 
     private function client(callable|MockResponse $responses): OdptTimetableClient
     {
-        return new OdptTimetableClient(new MockHttpClient($responses), self::TEST_KEY, new NullLogger(), 0);
+        return new OdptTimetableClient(new MockHttpClient($responses), self::TEST_KEY, new NullLogger(), new MockClock(), 0);
     }
 
     /**

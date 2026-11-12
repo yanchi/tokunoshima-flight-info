@@ -35,9 +35,10 @@ final class OdptTimetableMapper
         'odpt.Calendar:Saturday' => Weekday::Saturday,
         'odpt.Calendar:Sunday' => Weekday::Sunday,
     ];
-    // Only UTC and JST offsets: the verified data uses +09:00 throughout,
-    // and createFromFormat() accepts nonsense such as +99:99.
-    private const DATE_TIME_PATTERN = '/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|\+09:00)\z/';
+    // JST offset only: the verified data uses +09:00 throughout, the JST
+    // calendar day of other offsets is not defined yet (§7 step 7), and
+    // createFromFormat() accepts nonsense such as +99:99.
+    private const DATE_TIME_PATTERN = '/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00\z/';
     private const TIME_PATTERN = '/\A(?:[01]\d|2[0-3]):[0-5]\d\z/';
 
     /**

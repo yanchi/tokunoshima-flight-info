@@ -6,6 +6,7 @@ namespace App\Infrastructure\Provider\Odpt;
 
 use App\Application\Port\TimetableFetchFailed;
 use App\Domain\Flight\Direction;
+use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpClient\RetryableHttpClient;
 use Symfony\Contracts\HttpClient\Exception\ExceptionInterface;
@@ -37,7 +38,10 @@ final readonly class OdptTimetableClient
 
     private const MAX_RETRIES = 3;
     private const IDLE_TIMEOUT_SECONDS = 10.0;
-    private const MAX_DURATION_SECONDS = 60.0;
+    // Limits all attempts together, Retry-After and backoff waits
+    // included (AsyncContext::replaceRequest), so it must stay well above
+    // OdptRetryStrategy::MAX_DELAY_MS plus the backoff (1 + 2 + 4 s).
+    public const MAX_DURATION_SECONDS = 120.0;
 
     private HttpClientInterface $httpClient;
 
@@ -45,11 +49,12 @@ final readonly class OdptTimetableClient
         HttpClientInterface $httpClient,
         private string $consumerKey,
         private LoggerInterface $logger,
+        ClockInterface $clock,
         int $retryDelayMs = 1000,
     ) {
         $this->httpClient = new RetryableHttpClient(
             $httpClient,
-            new OdptRetryStrategy($retryDelayMs),
+            new OdptRetryStrategy($clock, $retryDelayMs),
             self::MAX_RETRIES,
         );
     }
@@ -91,7 +96,7 @@ final readonly class OdptTimetableClient
         } catch (HttpExceptionInterface $e) {
             throw new TimetableFetchFailed(\sprintf('ODPT timetable request (%s) returned HTTP %d.', $direction->value, $e->getResponse()->getStatusCode()));
         } catch (ExceptionInterface) {
-            throw new TimetableFetchFailed(\sprintf('ODPT timetable request (%s) failed before a response was received.', $direction->value));
+            throw new TimetableFetchFailed(\sprintf('ODPT timetable request (%s) failed or timed out without a usable response.', $direction->value));
         }
 
         try {
