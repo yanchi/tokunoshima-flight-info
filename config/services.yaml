@@ -9,6 +9,7 @@
 parameters:
     # Lets the app boot from real environment variables without a .env file.
     env(CONTACT_ADDRESS): ''
+    env(ODPT_CONSUMER_KEY): ''
 
 services:
     # default configuration for services in *this* file
@@ -27,6 +28,13 @@ services:
     App\Domain\Flight\FreshnessPolicy:
         arguments:
             $maxAgeSeconds: '%env(int:FLIGHT_DATA_MAX_AGE_SECONDS)%'
+
+    App\Infrastructure\Provider\Odpt\OdptTimetableClient:
+        arguments:
+            $consumerKey: '%env(ODPT_CONSUMER_KEY)%'
+
+    App\Application\Port\TimetableProviderInterface:
+        alias: App\Infrastructure\Provider\Odpt\OdptTimetableProvider
 
     # No data source is approved yet (CLAUDE.md §7), so the board reads from
     # a repository that never has data.
