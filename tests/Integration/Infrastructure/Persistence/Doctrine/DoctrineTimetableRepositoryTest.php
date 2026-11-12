@@ -12,7 +12,10 @@ use App\Domain\Flight\AirportCode;
 use App\Domain\Flight\Direction;
 use App\Domain\Flight\FlightNumber;
 use App\Domain\Flight\Weekday;
+use App\Infrastructure\Persistence\Doctrine\DoctrineTimetableRepository;
+use Doctrine\DBAL\DriverManager;
 use Doctrine\DBAL\Exception as DBALException;
+use Doctrine\ORM\EntityManager;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\SchemaTool;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -117,6 +120,44 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
         self::assertSame(TimetableSaveOutcome::NotNewerThanStored, $this->repository->save($sameSecond));
         $this->entityManager->clear();
         self::assertSame(self::described($stored)['entries'], self::described($this->latest(Direction::Departure))['entries']);
+    }
+
+    public function testFetchOneSecondLaterReplacesTheStoredOne(): void
+    {
+        $this->repository->save(self::departures('2026-11-12T04:00:00.900000Z'));
+
+        $nextSecond = self::departures('2026-11-12T04:00:01.000000Z', [
+            self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
+        ]);
+
+        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($nextSecond));
+        $this->entityManager->clear();
+        self::assertSame(self::described($nextSecond), self::described($this->latest(Direction::Departure)));
+    }
+
+    public function testOlderFetchDoesNotReplaceWhatAnotherProcessSavedMeanwhile(): void
+    {
+        // The record of this save stays managed in this entity manager.
+        $this->repository->save(self::departures('2026-11-12T03:00:00Z'));
+
+        // Another process (own connection and entity manager) saves a newer fetch.
+        $otherConnection = DriverManager::getConnection(
+            $this->entityManager->getConnection()->getParams(),
+            $this->entityManager->getConnection()->getConfiguration(),
+        );
+        $otherEntityManager = new EntityManager($otherConnection, $this->entityManager->getConfiguration());
+        $newer = self::departures('2026-11-12T05:00:00Z', [
+            self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
+        ]);
+        self::assertSame(TimetableSaveOutcome::Saved, new DoctrineTimetableRepository($otherEntityManager)->save($newer));
+        $otherConnection->close();
+
+        // No clear(): the stale managed record must not be trusted.
+        $older = self::departures('2026-11-12T04:00:00Z');
+        self::assertSame(TimetableSaveOutcome::NotNewerThanStored, $this->repository->save($older));
+
+        $this->entityManager->clear();
+        self::assertSame(self::described($newer), self::described($this->latest(Direction::Departure)));
     }
 
     public function testDirectionsAreStoredIndependently(): void

@@ -20,6 +20,12 @@ interface TimetableRepositoryInterface
      * record in one transaction. A fetch that did not start after the stored
      * one replaces nothing, so an overlapping manual sync cannot overwrite
      * newer data with older data.
+     *
+     * Concurrent saves are expected to be serialised by the application lock
+     * of the sync and gate commands (§7 step 7); without it, one of two
+     * simultaneous saves may fail instead of returning NotNewerThanStored.
+     * After a failure the underlying unit of work may be closed: callers
+     * that go on to save another direction must reset it first.
      */
     public function save(TimetableFetchResult $result): TimetableSaveOutcome;
 

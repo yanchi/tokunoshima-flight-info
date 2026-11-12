@@ -10,6 +10,7 @@ use App\Application\Port\TimetableSaveOutcome;
 use App\Domain\Flight\Direction;
 use App\Infrastructure\Persistence\Doctrine\Entity\TimetableFetchRecord;
 use App\Infrastructure\Persistence\Doctrine\Entity\TimetableFlight;
+use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
 
 final readonly class DoctrineTimetableRepository implements TimetableRepositoryInterface
@@ -32,6 +33,13 @@ final readonly class DoctrineTimetableRepository implements TimetableRepositoryI
 
         return $this->entityManager->wrapInTransaction(function (EntityManagerInterface $em) use ($result, $requestStartedAt): TimetableSaveOutcome {
             $record = $em->find(TimetableFetchRecord::class, $result->direction);
+            // find() returns an already managed record without a query, so
+            // another process's newer save would go unseen. Re-read it inside
+            // the transaction; the write lock is a no-op on SQLite and keeps
+            // other databases from a lost update.
+            if (null !== $record) {
+                $em->refresh($record, LockMode::PESSIMISTIC_WRITE);
+            }
 
             // Two fetches in the same second cannot be ordered, so the
             // stored one is kept.
@@ -46,8 +54,9 @@ final readonly class DoctrineTimetableRepository implements TimetableRepositoryI
                 ->getQuery()
                 ->execute();
 
-            foreach ($result->entries as $entry) {
-                $em->persist(TimetableFlight::fromEntry($result->direction, $entry));
+            $flights = array_map(static fn ($entry) => TimetableFlight::fromEntry($result->direction, $entry), $result->entries);
+            foreach ($flights as $flight) {
+                $em->persist($flight);
             }
 
             if (null === $record) {
@@ -57,6 +66,11 @@ final readonly class DoctrineTimetableRepository implements TimetableRepositoryI
             }
 
             $em->flush();
+            // Rows are only snapshots for the DTO; keeping them managed would
+            // pile up in a long-running process.
+            foreach ($flights as $flight) {
+                $em->detach($flight);
+            }
 
             return TimetableSaveOutcome::Saved;
         });
@@ -81,13 +95,18 @@ final readonly class DoctrineTimetableRepository implements TimetableRepositoryI
             ->getResult();
 
         $offset = new \DateTimeZone(self::SOURCE_OFFSET);
+        $entries = [];
+        foreach ($flights as $flight) {
+            $entries[] = $flight->toEntry($offset);
+            $this->entityManager->detach($flight);
+        }
 
         return new TimetableFetchResult(
             $direction,
             $record->requestStartedAt(),
             $record->latestDataDate()->setTimezone($offset),
             $record->recordCount(),
-            array_map(static fn (TimetableFlight $flight) => $flight->toEntry($offset), $flights),
+            $entries,
         );
     }
 }

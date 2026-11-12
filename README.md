@@ -39,12 +39,12 @@ APP_ENV=prod php bin/console app:check-deploy-config  # 本番デプロイ前チ
 ## ディレクトリ構成
 
 - `src/Domain/`   — ドメイン層（便名・空港コード・運航状況・運航日・発着方向・鮮度判定）
-- `src/Application/` — ユースケース（`GetDailyFlights`）、表示用DTO、ポート（`FlightBoardRepositoryInterface`）
+- `src/Application/` — ユースケース（`GetDailyFlights`）、表示用DTO、ポート（`FlightBoardRepositoryInterface`、`TimetableProviderInterface`、`TimetableRepositoryInterface`）
 - `src/Infrastructure/` — ポートの実装。画面は、データソース未承認のため常に「データなし」を返す `NoDataFlightBoardRepository` を読む。ODPT の時刻表の取得（`Provider/Odpt/`）と、方向ごとの時刻表の保存（`Persistence/Doctrine/`）は、まだ画面にも同期の処理にもつないでいない
-- `migrations/`   — Doctrine のマイグレーション
 - `src/Presentation/Controller/` — 画面（`/` 本日の発着一覧）
 - `src/Presentation/Twig/` — 表示ルール（運航状況ラベル、データが古いときの表示の抑止）
 - `config/`       — Symfony の設定
+- `migrations/`   — Doctrine のマイグレーション
 - `templates/`    — Twig テンプレート
 - `tests/Unit/`   — ユニットテスト
 - `tests/Functional/` — 画面の機能テスト
