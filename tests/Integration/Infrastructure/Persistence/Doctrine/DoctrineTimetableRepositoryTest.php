@@ -11,6 +11,7 @@ use App\Application\Port\TimetableSaveOutcome;
 use App\Domain\Flight\AirportCode;
 use App\Domain\Flight\Direction;
 use App\Domain\Flight\FlightNumber;
+use App\Domain\Flight\ServiceDate;
 use App\Domain\Flight\Weekday;
 use App\Infrastructure\Persistence\Doctrine\DoctrineTimetableRepository;
 use Doctrine\DBAL\DriverManager;
@@ -18,6 +19,7 @@ use Doctrine\DBAL\Exception as DBALException;
 use Doctrine\ORM\EntityManager;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\SchemaTool;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -53,7 +55,7 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
     {
         $saved = self::departures('2026-11-12T03:00:00Z', [
             self::entry('ZZ1001', 'TKN', 'ZZZ', Weekday::Monday, '09:00', '09:40'),
-            self::entry('ZZ1003', 'TKN', 'ZZZ', Weekday::Sunday, '15:00', '15:40', note: 'テスト用の備考', originDayDifference: 0, destinationDayDifference: 1),
+            self::entry('ZZ1003', 'TKN', 'ZZZ', Weekday::Sunday, '15:00', '15:40', note: 'テスト用の備考', originDayDifference: 0, destinationDayDifference: 0),
         ]);
 
         self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($saved));
@@ -63,6 +65,37 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
         self::assertNotNull($found);
         self::assertSame(self::described($saved), self::described($found));
         self::assertNull($this->repository->findLatest(Direction::Arrival));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function defaultTimezones(): iterable
+    {
+        yield 'west of UTC' => ['America/Los_Angeles'];
+        yield 'east of JST' => ['Pacific/Kiritimati'];
+    }
+
+    #[DataProvider('defaultTimezones')]
+    public function testPeriodDaysDoNotDependOnPhpDefaultTimezone(string $timezone): void
+    {
+        $saved = self::departures('2026-11-12T03:00:00Z', [
+            self::entry('ZZ1001', 'TKN', 'ZZZ', Weekday::Monday, '09:00', '09:40'),
+        ]);
+
+        $original = date_default_timezone_get();
+        date_default_timezone_set($timezone);
+        try {
+            $this->repository->save($saved);
+            $this->entityManager->clear();
+            $found = $this->repository->findLatest(Direction::Departure);
+        } finally {
+            date_default_timezone_set($original);
+        }
+
+        self::assertNotNull($found);
+        self::assertSame('2026-10-25', $found->entries[0]->validFrom->toString());
+        self::assertSame('2027-01-04', $found->entries[0]->validTo->toString());
     }
 
     public function testRequestStartIsStoredInUtcRoundedDownToTheSecond(): void
@@ -268,8 +301,8 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
             $destinationTime,
             $originDayDifference,
             $destinationDayDifference,
-            new \DateTimeImmutable('2026-10-25T00:00:00+09:00'),
-            new \DateTimeImmutable('2027-01-04T23:59:59+09:00'),
+            ServiceDate::fromString('2026-10-25'),
+            ServiceDate::fromString('2027-01-04'),
             $note,
             'odpt.Operator:ZZ',
         );
@@ -298,8 +331,8 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
                 $entry->destinationTime,
                 $entry->originDayDifference,
                 $entry->destinationDayDifference,
-                $entry->validFrom->format('Y-m-d\TH:i:s.uP'),
-                $entry->validTo->format('Y-m-d\TH:i:s.uP'),
+                $entry->validFrom->toString(),
+                $entry->validTo->toString(),
                 $entry->note,
                 $entry->airline,
             ], $result->entries),

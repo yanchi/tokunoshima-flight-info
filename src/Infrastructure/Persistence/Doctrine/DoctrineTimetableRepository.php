@@ -16,8 +16,7 @@ use Doctrine\ORM\EntityManagerInterface;
 final readonly class DoctrineTimetableRepository implements TimetableRepositoryInterface
 {
     // The mapper accepts +09:00 only (§7 step 7), so giving that offset back
-    // to the stored UTC instants restores the fetched values. Revisit with
-    // the JST calendar-day definition if other offsets are ever accepted.
+    // to the stored UTC dc:date restores the fetched value.
     private const SOURCE_OFFSET = '+09:00';
 
     public function __construct(private EntityManagerInterface $entityManager)
@@ -97,7 +96,7 @@ final readonly class DoctrineTimetableRepository implements TimetableRepositoryI
         $offset = new \DateTimeZone(self::SOURCE_OFFSET);
         $entries = [];
         foreach ($flights as $flight) {
-            $entries[] = $flight->toEntry($offset);
+            $entries[] = $flight->toEntry();
             $this->entityManager->detach($flight);
         }
 

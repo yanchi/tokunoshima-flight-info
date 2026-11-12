@@ -8,6 +8,7 @@ use App\Application\DTO\TimetableEntry;
 use App\Domain\Flight\AirportCode;
 use App\Domain\Flight\Direction;
 use App\Domain\Flight\FlightNumber;
+use App\Domain\Flight\ServiceDate;
 use App\Domain\Flight\Weekday;
 use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
@@ -45,9 +46,11 @@ class TimetableFlight
         private ?int $originDayDifference,
         #[ORM\Column(nullable: true)]
         private ?int $destinationDayDifference,
-        #[ORM\Column(type: Types::DATETIME_UTC_IMMUTABLE)]
+        // JST calendar days (§7 step 7). The date type keeps only Y-m-d,
+        // so no time zone is involved in storing them.
+        #[ORM\Column(type: Types::DATE_IMMUTABLE)]
         private \DateTimeImmutable $validFrom,
-        #[ORM\Column(type: Types::DATETIME_UTC_IMMUTABLE)]
+        #[ORM\Column(type: Types::DATE_IMMUTABLE)]
         private \DateTimeImmutable $validTo,
         #[ORM\Column(type: Types::TEXT, nullable: true)]
         private ?string $note,
@@ -68,17 +71,14 @@ class TimetableFlight
             $entry->destinationTime,
             $entry->originDayDifference,
             $entry->destinationDayDifference,
-            $entry->validFrom,
-            $entry->validTo,
+            $entry->validFrom->toDateTime(),
+            $entry->validTo->toDateTime(),
             $entry->note,
             $entry->airline,
         );
     }
 
-    /**
-     * @param \DateTimeZone $offset offset to give back to the stored UTC instants
-     */
-    public function toEntry(\DateTimeZone $offset): TimetableEntry
+    public function toEntry(): TimetableEntry
     {
         return new TimetableEntry(
             FlightNumber::fromString($this->flightNumber),
@@ -89,8 +89,8 @@ class TimetableFlight
             $this->destinationTime,
             $this->originDayDifference,
             $this->destinationDayDifference,
-            $this->validFrom->setTimezone($offset),
-            $this->validTo->setTimezone($offset),
+            ServiceDate::fromString($this->validFrom->format('Y-m-d')),
+            ServiceDate::fromString($this->validTo->format('Y-m-d')),
             $this->note,
             $this->airline,
         );

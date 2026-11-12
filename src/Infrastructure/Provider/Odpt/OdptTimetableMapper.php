@@ -10,6 +10,7 @@ use App\Application\Port\TimetableFetchFailed;
 use App\Domain\Flight\AirportCode;
 use App\Domain\Flight\Direction;
 use App\Domain\Flight\FlightNumber;
+use App\Domain\Flight\ServiceDate;
 use App\Domain\Flight\Weekday;
 
 /**
@@ -35,9 +36,9 @@ final class OdptTimetableMapper
         'odpt.Calendar:Saturday' => Weekday::Saturday,
         'odpt.Calendar:Sunday' => Weekday::Sunday,
     ];
-    // JST offset only: the verified data uses +09:00 throughout, the JST
-    // calendar day of other offsets is not defined yet (§7 step 7), and
-    // createFromFormat() accepts nonsense such as +99:99.
+    // JST offset only: the verified data uses +09:00 throughout, other
+    // offsets are rejected by the JST calendar-day definition (§7 step 7),
+    // and createFromFormat() accepts nonsense such as +99:99.
     private const DATE_TIME_PATTERN = '/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00\z/';
     private const TIME_PATTERN = '/\A(?:[01]\d|2[0-3]):[0-5]\d\z/';
 
@@ -139,10 +140,21 @@ final class OdptTimetableMapper
             throw $this->fail($direction, $at.' is not an object');
         }
 
-        $validFrom = $this->dateTime($direction, $object, 'odpt:isValidFrom', $at);
-        $validTo = $this->dateTime($direction, $object, 'odpt:isValidTo', $at);
-        if ($validFrom > $validTo) {
+        $validFrom = $this->calendarDay($direction, $object, 'odpt:isValidFrom', '00:00:00', $at);
+        $validTo = $this->calendarDay($direction, $object, 'odpt:isValidTo', '23:59:59', $at);
+        if ($validFrom->compareTo($validTo) > 0) {
             throw $this->fail($direction, $at.' has odpt:isValidFrom after odpt:isValidTo');
+        }
+
+        $originTime = $this->time($direction, $object, 'odpt:originTime', $at);
+        $destinationTime = $this->time($direction, $object, 'odpt:destinationTime', $at);
+        // Checked regardless of the day difference. An arrival before the
+        // departure can only be read as crossing midnight, which is not
+        // accepted yet (see dayDifference()); an arrival at the departure
+        // time is either broken data or 24 hours later, and neither is
+        // guessed (§7 step 7). "HH:MM" strings sort in time order.
+        if ($destinationTime <= $originTime) {
+            throw $this->fail($direction, $at.' does not arrive after it departs');
         }
 
         return new TimetableEntry(
@@ -150,10 +162,10 @@ final class OdptTimetableMapper
             $origin,
             $destination,
             $weekday,
-            $this->time($direction, $object, 'odpt:originTime', $at),
-            $this->time($direction, $object, 'odpt:destinationTime', $at),
-            $this->optionalInt($direction, $object, 'odpt:originDayDifference', $at),
-            $this->optionalInt($direction, $object, 'odpt:destinationDayDifference', $at),
+            $originTime,
+            $destinationTime,
+            $this->dayDifference($direction, $object, 'odpt:originDayDifference', $at),
+            $this->dayDifference($direction, $object, 'odpt:destinationDayDifference', $at),
             $validFrom,
             $validTo,
             $this->note($direction, $object, $at),
@@ -165,7 +177,8 @@ final class OdptTimetableMapper
      * The same flight number may appear several times in one record, once
      * per period (e.g. a timetable change). Overlapping periods would put
      * the flight on the same day at two times, and which one is right
-     * cannot be decided, so they fail.
+     * cannot be decided, so they fail. Periods are compared as JST
+     * calendar days, both ends inclusive.
      *
      * @param list<TimetableEntry> $entries entries of one record
      */
@@ -173,7 +186,7 @@ final class OdptTimetableMapper
     {
         foreach ($entries as $i => $a) {
             foreach (\array_slice($entries, $i + 1) as $b) {
-                if ($a->flightNumber->equals($b->flightNumber) && $a->validFrom <= $b->validTo && $b->validFrom <= $a->validTo) {
+                if ($a->flightNumber->equals($b->flightNumber) && $a->validFrom->compareTo($b->validTo) <= 0 && $b->validFrom->compareTo($a->validTo) <= 0) {
                     throw $this->fail($direction, \sprintf('%s has overlapping periods for one flight number', $at));
                 }
             }
@@ -233,6 +246,25 @@ final class OdptTimetableMapper
     }
 
     /**
+     * JST calendar day of a period end (§7 step 7). Only a whole day is
+     * accepted: the start must be at 00:00:00 and the end at 23:59:59, so
+     * that a period never starts or ends part-way through a day, which
+     * would leave it unclear whether that day is in the period.
+     *
+     * @param array<mixed> $object
+     */
+    private function calendarDay(Direction $direction, array $object, string $key, string $timeOfDay, string $at): ServiceDate
+    {
+        $value = $this->dateTime($direction, $object, $key, $at);
+        if ($timeOfDay !== $value->format('H:i:s')) {
+            throw $this->fail($direction, \sprintf('%s has a %s value that is not at %s', $at, $key, $timeOfDay));
+        }
+
+        // The offset is +09:00 (dateTime()), so this is the date as written.
+        return ServiceDate::fromInstant($value);
+    }
+
+    /**
      * Requires an explicit offset: a value without one would be read in
      * PHP's default time zone.
      *
@@ -262,6 +294,25 @@ final class OdptTimetableMapper
         $value = $object[$key] ?? null;
         if (!\is_string($value) || 1 !== preg_match(self::TIME_PATTERN, $value)) {
             throw $this->fail($direction, \sprintf('%s has an invalid %s', $at, $key));
+        }
+
+        return $value;
+    }
+
+    /**
+     * Only flights on a single day pass (null or 0). Whether the period's
+     * calendar days are departure or arrival days is not decided, and both
+     * give the same days only when nothing crosses midnight (§7 step 7).
+     * A missing or null value is read as a same-day flight, an assumption
+     * from the observed data; the time order is checked in entry().
+     *
+     * @param array<mixed> $object
+     */
+    private function dayDifference(Direction $direction, array $object, string $key, string $at): ?int
+    {
+        $value = $this->optionalInt($direction, $object, $key, $at);
+        if (null !== $value && 0 !== $value) {
+            throw $this->fail($direction, \sprintf('%s has a non-zero %s', $at, $key));
         }
 
         return $value;
