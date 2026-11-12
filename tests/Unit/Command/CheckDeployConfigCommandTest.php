@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Command;
 
 use App\Command\CheckDeployConfigCommand;
+use App\Domain\Flight\TimetableFreshnessPolicy;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Console\Command\Command;
@@ -14,7 +15,7 @@ final class CheckDeployConfigCommandTest extends TestCase
 {
     public function testPassesWhenAllSettingsAreSet(): void
     {
-        $tester = new CommandTester(new CheckDeployConfigCommand('prod', 'test-secret', 'test@example.invalid'));
+        $tester = new CommandTester(new CheckDeployConfigCommand('prod', 'test-secret', 'test@example.invalid', self::validThresholds()));
 
         self::assertSame(Command::SUCCESS, $tester->execute([]));
     }
@@ -31,7 +32,7 @@ final class CheckDeployConfigCommandTest extends TestCase
     #[DataProvider('nonProdEnvironments')]
     public function testFailsOutsideProd(string $environment): void
     {
-        $tester = new CommandTester(new CheckDeployConfigCommand($environment, 'test-secret', 'test@example.invalid'));
+        $tester = new CommandTester(new CheckDeployConfigCommand($environment, 'test-secret', 'test@example.invalid', self::validThresholds()));
 
         self::assertSame(Command::FAILURE, $tester->execute([], ['capture_stderr_separately' => true]));
         self::assertStringContainsString('APP_ENV=prod', $tester->getErrorOutput());
@@ -55,18 +56,31 @@ final class CheckDeployConfigCommandTest extends TestCase
     #[DataProvider('emptySettings')]
     public function testFailsAndNamesEmptySettings(string $secret, string $contact, string $expected): void
     {
-        $tester = new CommandTester(new CheckDeployConfigCommand('prod', $secret, $contact));
+        $tester = new CommandTester(new CheckDeployConfigCommand('prod', $secret, $contact, self::validThresholds()));
 
         self::assertSame(Command::FAILURE, $tester->execute([], ['capture_stderr_separately' => true]));
-        self::assertStringContainsString('Unset settings (empty or placeholder): '.$expected, $tester->getErrorOutput());
+        self::assertStringContainsString('Unset or invalid settings (empty, placeholder or out of range): '.$expected, $tester->getErrorOutput());
         self::assertSame('', $tester->getDisplay());
     }
 
     public function testDoesNotPrintValues(): void
     {
-        $tester = new CommandTester(new CheckDeployConfigCommand('prod', 'do-not-print-this', ''));
+        $tester = new CommandTester(new CheckDeployConfigCommand('prod', 'do-not-print-this', '', self::validThresholds()));
         $tester->execute([], ['capture_stderr_separately' => true]);
 
         self::assertStringNotContainsString('do-not-print-this', $tester->getDisplay().$tester->getErrorOutput());
+    }
+
+    public function testFailsAndNamesInvalidTimetableThresholds(): void
+    {
+        $tester = new CommandTester(new CheckDeployConfigCommand('prod', 'test-secret', 'test@example.invalid', new TimetableFreshnessPolicy('604800', '259200')));
+
+        self::assertSame(Command::FAILURE, $tester->execute([], ['capture_stderr_separately' => true]));
+        self::assertStringContainsString('TIMETABLE_WARN_AFTER_SECONDS / TIMETABLE_SUSPEND_AFTER_SECONDS', $tester->getErrorOutput());
+    }
+
+    private static function validThresholds(): TimetableFreshnessPolicy
+    {
+        return new TimetableFreshnessPolicy('259200', '604800');
     }
 }

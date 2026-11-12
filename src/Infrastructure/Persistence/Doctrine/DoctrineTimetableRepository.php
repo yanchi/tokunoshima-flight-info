@@ -6,12 +6,15 @@ namespace App\Infrastructure\Persistence\Doctrine;
 
 use App\Application\DTO\TimetableFetchResult;
 use App\Application\Port\TimetableRepositoryInterface;
-use App\Application\Port\TimetableSaveOutcome;
+use App\Application\Port\TimetableSaveResult;
+use App\Application\Sync\TimetableReplacementRule;
 use App\Domain\Flight\Direction;
 use App\Infrastructure\Persistence\Doctrine\Entity\TimetableFetchRecord;
 use App\Infrastructure\Persistence\Doctrine\Entity\TimetableFlight;
 use Doctrine\DBAL\LockMode;
 use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\Persistence\ManagerRegistry;
+use Psr\Clock\ClockInterface;
 
 final readonly class DoctrineTimetableRepository implements TimetableRepositoryInterface
 {
@@ -19,75 +22,89 @@ final readonly class DoctrineTimetableRepository implements TimetableRepositoryI
     // to the stored UTC dc:date restores the fetched value.
     private const SOURCE_OFFSET = '+09:00';
 
-    public function __construct(private EntityManagerInterface $entityManager)
-    {
+    public function __construct(
+        private EntityManagerInterface $entityManager,
+        private ClockInterface $clock,
+        private ?ManagerRegistry $registry = null,
+    ) {
     }
 
-    public function save(TimetableFetchResult $result): TimetableSaveOutcome
+    public function save(TimetableFetchResult $result): TimetableSaveResult
     {
-        // Stored at whole seconds. Rounding down makes the data look older,
-        // never newer, than it is (§7 step 7).
-        $requestStartedAt = new \DateTimeImmutable('@'.$result->requestStartedAt->getTimestamp())
-            ->setTimezone(new \DateTimeZone('UTC'));
+        $requestStartedAt = $result->storedRequestStartedAt();
 
-        return $this->entityManager->wrapInTransaction(function (EntityManagerInterface $em) use ($result, $requestStartedAt): TimetableSaveOutcome {
-            $record = $em->find(TimetableFetchRecord::class, $result->direction);
-            // find() returns an already managed record without a query, so
-            // another process's newer save would go unseen. Re-read it inside
-            // the transaction; the write lock is a no-op on SQLite and keeps
-            // other databases from a lost update.
-            if (null !== $record) {
-                $em->refresh($record, LockMode::PESSIMISTIC_WRITE);
+        try {
+            return $this->entityManager->wrapInTransaction(function (EntityManagerInterface $em) use ($result, $requestStartedAt): TimetableSaveResult {
+                $record = $em->find(TimetableFetchRecord::class, $result->direction);
+                // find() returns an already managed record without a query, so
+                // another process's newer save would go unseen. Re-read it inside
+                // the transaction; the write lock is a no-op on SQLite and keeps
+                // other databases from a lost update.
+                if (null !== $record) {
+                    $em->refresh($record, LockMode::PESSIMISTIC_WRITE);
+                }
+                $previous = null === $record ? null : $this->toResult($record);
+
+                // Taken right after the re-read, unrounded (§7 step 7).
+                $judgedAt = $this->clock->now();
+                $outcome = TimetableReplacementRule::decide($requestStartedAt, $record?->requestStartedAt(), $judgedAt);
+                if (!$outcome->replaced()) {
+                    return new TimetableSaveResult($outcome, $previous, $judgedAt);
+                }
+
+                $em->createQueryBuilder()
+                    ->delete(TimetableFlight::class, 'f')
+                    ->where('f.direction = :direction')
+                    ->setParameter('direction', $result->direction)
+                    ->getQuery()
+                    ->execute();
+
+                $flights = array_map(static fn ($entry) => TimetableFlight::fromEntry($result->direction, $entry), $result->entries);
+                foreach ($flights as $flight) {
+                    $em->persist($flight);
+                }
+
+                if (null === $record) {
+                    $em->persist(new TimetableFetchRecord($result->direction, $requestStartedAt, $result->latestDataDate, $result->recordCount));
+                } else {
+                    $record->replace($requestStartedAt, $result->latestDataDate, $result->recordCount);
+                }
+
+                $em->flush();
+                // Rows are only snapshots for the DTO; keeping them managed would
+                // pile up in a long-running process.
+                foreach ($flights as $flight) {
+                    $em->detach($flight);
+                }
+
+                return new TimetableSaveResult($outcome, $previous, $judgedAt);
+            });
+        } catch (\Throwable $e) {
+            // A failed transaction closes the entity manager. Reset it so the
+            // other direction can still be saved in the same run.
+            if (null !== $this->registry && !$this->entityManager->isOpen()) {
+                $this->registry->resetManager();
             }
 
-            // Two fetches in the same second cannot be ordered, so the
-            // stored one is kept.
-            if (null !== $record && $requestStartedAt <= $record->requestStartedAt()) {
-                return TimetableSaveOutcome::NotNewerThanStored;
-            }
-
-            $em->createQueryBuilder()
-                ->delete(TimetableFlight::class, 'f')
-                ->where('f.direction = :direction')
-                ->setParameter('direction', $result->direction)
-                ->getQuery()
-                ->execute();
-
-            $flights = array_map(static fn ($entry) => TimetableFlight::fromEntry($result->direction, $entry), $result->entries);
-            foreach ($flights as $flight) {
-                $em->persist($flight);
-            }
-
-            if (null === $record) {
-                $em->persist(new TimetableFetchRecord($result->direction, $requestStartedAt, $result->latestDataDate, $result->recordCount));
-            } else {
-                $record->replace($requestStartedAt, $result->latestDataDate, $result->recordCount);
-            }
-
-            $em->flush();
-            // Rows are only snapshots for the DTO; keeping them managed would
-            // pile up in a long-running process.
-            foreach ($flights as $flight) {
-                $em->detach($flight);
-            }
-
-            return TimetableSaveOutcome::Saved;
-        });
+            throw $e;
+        }
     }
 
     public function findLatest(Direction $direction): ?TimetableFetchResult
     {
         $record = $this->entityManager->find(TimetableFetchRecord::class, $direction);
-        if (null === $record) {
-            return null;
-        }
 
+        return null === $record ? null : $this->toResult($record);
+    }
+
+    private function toResult(TimetableFetchRecord $record): TimetableFetchResult
+    {
         /** @var list<TimetableFlight> $flights */
         $flights = $this->entityManager->createQueryBuilder()
             ->select('f')
             ->from(TimetableFlight::class, 'f')
             ->where('f.direction = :direction')
-            ->setParameter('direction', $direction)
+            ->setParameter('direction', $record->direction())
             // Insertion order, i.e. the order of the fetched response.
             ->orderBy('f.id')
             ->getQuery()
@@ -101,7 +118,7 @@ final readonly class DoctrineTimetableRepository implements TimetableRepositoryI
         }
 
         return new TimetableFetchResult(
-            $direction,
+            $record->direction(),
             $record->requestStartedAt(),
             $record->latestDataDate()->setTimezone($offset),
             $record->recordCount(),

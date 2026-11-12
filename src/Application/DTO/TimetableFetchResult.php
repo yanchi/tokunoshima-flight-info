@@ -26,4 +26,14 @@ final readonly class TimetableFetchResult
         public array $entries,
     ) {
     }
+
+    /**
+     * The request start as stored: in UTC, rounded down to the second, so
+     * the data never looks newer than it is (§7 step 7).
+     */
+    public function storedRequestStartedAt(): \DateTimeImmutable
+    {
+        return new \DateTimeImmutable('@'.$this->requestStartedAt->getTimestamp())
+            ->setTimezone(new \DateTimeZone('UTC'));
+    }
 }

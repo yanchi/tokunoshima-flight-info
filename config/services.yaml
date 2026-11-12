@@ -10,6 +10,11 @@ parameters:
     # Lets the app boot from real environment variables without a .env file.
     env(CONTACT_ADDRESS): ''
     env(ODPT_CONSUMER_KEY): ''
+    # Read as raw strings and validated by TimetableFreshnessPolicy, so an
+    # unset or malformed value stops the timetable instead of every page
+    # (docs/data-source-verification.md §7 step 7). Never use env(int:...) here.
+    env(TIMETABLE_WARN_AFTER_SECONDS): ''
+    env(TIMETABLE_SUSPEND_AFTER_SECONDS): ''
 
 services:
     # default configuration for services in *this* file
@@ -47,6 +52,18 @@ services:
         arguments:
             $httpClient: '@odpt.http_client'
             $consumerKey: '%env(ODPT_CONSUMER_KEY)%'
+            $logger: '@monolog.logger.timetable_sync'
+
+    App\Domain\Flight\TimetableFreshnessPolicy:
+        arguments:
+            $warnAfterSeconds: '%env(TIMETABLE_WARN_AFTER_SECONDS)%'
+            $suspendAfterSeconds: '%env(TIMETABLE_SUSPEND_AFTER_SECONDS)%'
+
+    # The sync log (§7 step 7) is its own channel, written in full in prod
+    # (config/packages/monolog.yaml).
+    App\Application\UseCase\SyncTimetable:
+        arguments:
+            $logger: '@monolog.logger.timetable_sync'
 
     App\Application\Port\TimetableProviderInterface:
         alias: App\Infrastructure\Provider\Odpt\OdptTimetableProvider
@@ -63,7 +80,9 @@ when@test:
         test.odpt_timetable_client:
             alias: App\Infrastructure\Provider\Odpt\OdptTimetableClient
             public: true
-        # Same reason: the sync command that will use it does not exist yet.
+        test.clock:
+            alias: Psr\Clock\ClockInterface
+            public: true
         test.timetable_repository:
             alias: App\Application\Port\TimetableRepositoryInterface
             public: true
