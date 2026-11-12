@@ -246,7 +246,7 @@ final class OdptTimetableMapper
     {
         $value = $this->dateTime($direction, $object, $key, $at);
         if ($timeOfDay !== $value->format('H:i:s')) {
-            throw $this->fail($direction, \sprintf('%s has an %s that is not at %s', $at, $key, $timeOfDay));
+            throw $this->fail($direction, \sprintf('%s has a %s value that is not at %s', $at, $key, $timeOfDay));
         }
 
         // The offset is +09:00 (dateTime()), so this is the date as written.

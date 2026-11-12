@@ -48,8 +48,8 @@ final readonly class ServiceDate
      */
     public function compareTo(self $other): int
     {
-        // Y-m-d strings of four-digit years sort in date order.
-        return $this->toString() <=> $other->toString();
+        // Both are midnight JST, so comparing the instants compares the days.
+        return $this->date <=> $other->date;
     }
 
     public function equals(self $other): bool
