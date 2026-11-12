@@ -29,8 +29,19 @@ services:
         arguments:
             $maxAgeSeconds: '%env(int:FLIGHT_DATA_MAX_AGE_SECONDS)%'
 
+    # The ODPT consumer key is part of the request URL. The framework's
+    # http_client logs every URL (CurlHttpClient: 'Request: "GET <url>"'),
+    # so ODPT gets its own client created without a logger (CLAUDE.md §8).
+    odpt.http_client:
+        class: Symfony\Contracts\HttpClient\HttpClientInterface
+        factory: ['Symfony\Component\HttpClient\HttpClient', 'create']
+        arguments: [{ max_redirects: 0 }]
+        # Autoconfiguration adds setLogger() to LoggerAware services.
+        autoconfigure: false
+
     App\Infrastructure\Provider\Odpt\OdptTimetableClient:
         arguments:
+            $httpClient: '@odpt.http_client'
             $consumerKey: '%env(ODPT_CONSUMER_KEY)%'
 
     App\Application\Port\TimetableProviderInterface:
@@ -40,3 +51,11 @@ services:
     # a repository that never has data.
     App\Application\Port\FlightBoardRepositoryInterface:
         alias: App\Infrastructure\Persistence\NoDataFlightBoardRepository
+
+when@test:
+    services:
+        # Nothing uses the provider yet, so without this the compiled test
+        # container drops it and the wiring test cannot reach it.
+        App\Application\Port\TimetableProviderInterface:
+            alias: App\Infrastructure\Provider\Odpt\OdptTimetableProvider
+            public: true

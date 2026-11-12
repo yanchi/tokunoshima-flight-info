@@ -12,6 +12,7 @@ use App\Infrastructure\Provider\Odpt\OdptTimetableProvider;
 use App\Tests\Support\FictionalOdptTimetable;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\AbstractLogger;
 use Psr\Log\NullLogger;
 use Symfony\Component\Clock\MockClock;
 use Symfony\Component\HttpClient\Exception\TransportException;
@@ -105,6 +106,81 @@ final class OdptTimetableClientTest extends TestCase
 
         $this->expectFailure(new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0), 'returned HTTP 503');
         self::assertSame(4, $http->getRequestsCount());
+    }
+
+    public function testRecoversAfterServerErrorsWithinTheLimit(): void
+    {
+        $http = new MockHttpClient([
+            new MockResponse('', ['http_code' => 503]),
+            new MockResponse('', ['http_code' => 503]),
+            new MockResponse('', ['http_code' => 503]),
+            new MockResponse('[]'),
+        ]);
+
+        $body = new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0)->fetch(Direction::Departure);
+
+        self::assertSame([], $body);
+        self::assertSame(4, $http->getRequestsCount());
+    }
+
+    public function testShortRetryAfterIsHonoured(): void
+    {
+        $http = new MockHttpClient([
+            new MockResponse('', ['http_code' => 429, 'response_headers' => ['Retry-After: 0']]),
+            new MockResponse('[]'),
+        ]);
+
+        new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0)->fetch(Direction::Departure);
+
+        self::assertSame(2, $http->getRequestsCount());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function longRetryAfters(): iterable
+    {
+        yield 'seconds' => ['3600'];
+        yield 'just over the cap' => ['61'];
+        yield 'HTTP date' => [gmdate('D, d M Y H:i:s', time() + 3600).' GMT'];
+    }
+
+    #[DataProvider('longRetryAfters')]
+    public function testLongRetryAfterFailsInsteadOfWaiting(string $retryAfter): void
+    {
+        $http = new MockHttpClient([
+            new MockResponse('', ['http_code' => 429, 'response_headers' => ['Retry-After: '.$retryAfter]]),
+            new MockResponse('[]'),
+        ]);
+
+        $this->expectFailure(new OdptTimetableClient($http, self::TEST_KEY, new NullLogger(), 0), 'returned HTTP 429');
+        self::assertSame(1, $http->getRequestsCount());
+    }
+
+    public function testLogsRemainingCallsButNeitherKeyNorUrl(): void
+    {
+        $logger = new class extends AbstractLogger {
+            /** @var list<string> */
+            public array $lines = [];
+
+            public function log($level, \Stringable|string $message, array $context = []): void
+            {
+                $this->lines[] = $message.' '.json_encode($context);
+            }
+        };
+        $http = new MockHttpClient(new MockResponse('[]', ['response_headers' => [
+            'X-RateLimit-Limit-minute: 60',
+            'X-RateLimit-Remaining-minute: 59',
+            'X-RateLimit-Remaining-day: 23999',
+        ]]));
+
+        new OdptTimetableClient($http, self::TEST_KEY, $logger, 0)->fetch(Direction::Arrival);
+
+        self::assertCount(1, $logger->lines);
+        self::assertStringContainsString('"minute":"59"', $logger->lines[0]);
+        self::assertStringContainsString('"day":"23999"', $logger->lines[0]);
+        self::assertStringNotContainsString(self::TEST_KEY, $logger->lines[0]);
+        self::assertStringNotContainsString('api.odpt.org', $logger->lines[0]);
     }
 
     public function testTransportErrorsAreNotRetried(): void

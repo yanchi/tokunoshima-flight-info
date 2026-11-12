@@ -24,8 +24,20 @@ final class OdptTimetableMapper
     public const RECORD_LIMIT = 1000;
 
     private const AIRPORT_PREFIX = 'odpt.Airport:';
-    private const CALENDAR_PREFIX = 'odpt.Calendar:';
-    private const DATE_TIME_PATTERN = '/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})\z/';
+    // Explicit map so that renaming a Weekday case cannot silently break
+    // the mapping of ODPT values (CLAUDE.md §4).
+    private const CALENDARS = [
+        'odpt.Calendar:Monday' => Weekday::Monday,
+        'odpt.Calendar:Tuesday' => Weekday::Tuesday,
+        'odpt.Calendar:Wednesday' => Weekday::Wednesday,
+        'odpt.Calendar:Thursday' => Weekday::Thursday,
+        'odpt.Calendar:Friday' => Weekday::Friday,
+        'odpt.Calendar:Saturday' => Weekday::Saturday,
+        'odpt.Calendar:Sunday' => Weekday::Sunday,
+    ];
+    // Only UTC and JST offsets: the verified data uses +09:00 throughout,
+    // and createFromFormat() accepts nonsense such as +99:99.
+    private const DATE_TIME_PATTERN = '/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|\+09:00)\z/';
     private const TIME_PATTERN = '/\A(?:[01]\d|2[0-3]):[0-5]\d\z/';
 
     /**
@@ -81,14 +93,28 @@ final class OdptTimetableMapper
                 $latestDataDate = $dataDate;
             }
 
-            $objects = $record['odpt:flightScheduleObject'] ?? [];
+            // A missing key is not read as "no flights", in the same way a
+            // missing isValidFrom is not read as "no limit".
+            if (!\array_key_exists('odpt:flightScheduleObject', $record)) {
+                throw $this->fail($direction, $at.' has no odpt:flightScheduleObject');
+            }
+            $objects = $record['odpt:flightScheduleObject'];
             if (!\is_array($objects) || !array_is_list($objects)) {
                 throw $this->fail($direction, $at.' has an odpt:flightScheduleObject that is not an array');
             }
 
+            // An empty list for one record is allowed: a route may have no
+            // flights on some weekday. All records empty is checked below.
+            $recordEntries = [];
             foreach ($objects as $objectIndex => $object) {
-                $entries[] = $this->entry($direction, $object, \sprintf('%s flight %d', $at, $objectIndex), $origin, $destination, $weekday);
+                $recordEntries[] = $this->entry($direction, $object, \sprintf('%s flight %d', $at, $objectIndex), $origin, $destination, $weekday);
             }
+            $this->assertNoOverlappingPeriods($direction, $recordEntries, $at);
+            array_push($entries, ...$recordEntries);
+        }
+
+        if ([] === $entries) {
+            throw $this->fail($direction, 'response has no flights');
         }
 
         return new TimetableFetchResult(
@@ -135,6 +161,25 @@ final class OdptTimetableMapper
     }
 
     /**
+     * The same flight number may appear several times in one record, once
+     * per period (e.g. a timetable change). Overlapping periods would put
+     * the flight on the same day at two times, and which one is right
+     * cannot be decided, so they fail.
+     *
+     * @param list<TimetableEntry> $entries entries of one record
+     */
+    private function assertNoOverlappingPeriods(Direction $direction, array $entries, string $at): void
+    {
+        foreach ($entries as $i => $a) {
+            foreach (\array_slice($entries, $i + 1) as $b) {
+                if ($a->flightNumber->equals($b->flightNumber) && $a->validFrom <= $b->validTo && $b->validFrom <= $a->validTo) {
+                    throw $this->fail($direction, \sprintf('%s has overlapping periods for one flight number', $at));
+                }
+            }
+        }
+    }
+
+    /**
      * Code-share flights would carry several numbers. None appear in the
      * verified data and how to show them is not decided, so they fail.
      *
@@ -177,14 +222,8 @@ final class OdptTimetableMapper
     private function weekday(Direction $direction, array $record, string $at): Weekday
     {
         $value = $record['odpt:calendar'] ?? null;
-        $name = \is_string($value) && str_starts_with($value, self::CALENDAR_PREFIX)
-            ? substr($value, \strlen(self::CALENDAR_PREFIX))
-            : null;
-
-        foreach (Weekday::cases() as $weekday) {
-            if ($weekday->name === $name) {
-                return $weekday;
-            }
+        if (\is_string($value) && isset(self::CALENDARS[$value])) {
+            return self::CALENDARS[$value];
         }
 
         // Other calendars (holidays, specific days) are not in the verified
@@ -232,7 +271,8 @@ final class OdptTimetableMapper
      */
     private function optionalInt(Direction $direction, array $object, string $key, string $at): ?int
     {
-        if (!\array_key_exists($key, $object)) {
+        // Missing and null both mean "not given"; neither becomes 0.
+        if (null === ($object[$key] ?? null)) {
             return null;
         }
         if (!\is_int($object[$key])) {

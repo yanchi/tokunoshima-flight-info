@@ -7,7 +7,6 @@ namespace App\Infrastructure\Provider\Odpt;
 use App\Application\Port\TimetableFetchFailed;
 use App\Domain\Flight\Direction;
 use Psr\Log\LoggerInterface;
-use Symfony\Component\HttpClient\Retry\GenericRetryStrategy;
 use Symfony\Component\HttpClient\RetryableHttpClient;
 use Symfony\Contracts\HttpClient\Exception\ExceptionInterface;
 use Symfony\Contracts\HttpClient\Exception\HttpExceptionInterface;
@@ -15,6 +14,9 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 /**
  * Calls the ODPT FlightSchedule endpoint for Tokunoshima flights.
+ *
+ * The consumer key travels in the query string, so the injected client
+ * must not log request URLs (config/services.yaml: odpt.http_client).
  *
  * Error messages are written here and never copied from HttpClient
  * exceptions, because those contain the request URL and with it the
@@ -33,9 +35,6 @@ final readonly class OdptTimetableClient
     public const PARAM_DESTINATION_AIRPORT = 'odpt:destinationAirport';
     public const PARAM_CONSUMER_KEY = 'acl:consumerKey';
 
-    // Only rate limiting and server errors are retried; 403 and 404 are
-    // not (§8). Transport errors are not retried either.
-    private const RETRY_STATUS_CODES = [429, 500, 502, 503, 504];
     private const MAX_RETRIES = 3;
     private const IDLE_TIMEOUT_SECONDS = 10.0;
     private const MAX_DURATION_SECONDS = 60.0;
@@ -50,7 +49,7 @@ final readonly class OdptTimetableClient
     ) {
         $this->httpClient = new RetryableHttpClient(
             $httpClient,
-            new GenericRetryStrategy(self::RETRY_STATUS_CODES, $retryDelayMs, 2.0),
+            new OdptRetryStrategy($retryDelayMs),
             self::MAX_RETRIES,
         );
     }

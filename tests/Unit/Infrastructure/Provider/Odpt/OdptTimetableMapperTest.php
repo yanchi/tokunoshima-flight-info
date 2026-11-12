@@ -88,14 +88,53 @@ final class OdptTimetableMapperTest extends TestCase
         self::assertSame('2026-09-01T10:00:00+09:00', $result->latestDataDate->format(\DATE_ATOM));
     }
 
-    public function testRecordWithoutFlightsIsAllowed(): void
+    public function testNullDayDifferenceIsNullNotZero(): void
+    {
+        $flight = FictionalOdptTimetable::flight('ZZ1002', '10:30', '11:10');
+        $flight['odpt:originDayDifference'] = null;
+        $flight['odpt:destinationDayDifference'] = null;
+
+        $result = $this->mapper->map(Direction::Arrival, [
+            FictionalOdptTimetable::record('ZZZ', 'TKN', 'Monday', [$flight]),
+        ], new \DateTimeImmutable());
+
+        self::assertNull($result->entries[0]->originDayDifference);
+        self::assertNull($result->entries[0]->destinationDayDifference);
+    }
+
+    public function testOneRecordWithoutFlightsIsAllowed(): void
     {
         $result = $this->mapper->map(Direction::Arrival, [
             FictionalOdptTimetable::record('ZZZ', 'TKN', 'Monday', []),
+            FictionalOdptTimetable::arrivalRecord('Tuesday'),
         ], new \DateTimeImmutable());
 
-        self::assertSame(1, $result->recordCount);
-        self::assertSame([], $result->entries);
+        self::assertSame(2, $result->recordCount);
+        self::assertCount(1, $result->entries);
+    }
+
+    public function testAcceptsUtcOffsetWrittenAsZ(): void
+    {
+        $record = FictionalOdptTimetable::arrivalRecord();
+        $record['dc:date'] = '2026-08-21T04:00:00Z';
+
+        $result = $this->mapper->map(Direction::Arrival, [$record], new \DateTimeImmutable());
+
+        self::assertSame('2026-08-21T13:00:00+09:00', $result->latestDataDate->setTimezone(new \DateTimeZone('Asia/Tokyo'))->format(\DATE_ATOM));
+    }
+
+    public function testConsecutivePeriodsOfOneFlightAreAllowed(): void
+    {
+        $until = FictionalOdptTimetable::flight('ZZ1002', '10:30', '11:10');
+        $until['odpt:isValidFrom'] = '2026-09-01T00:00:00+09:00';
+        $until['odpt:isValidTo'] = '2026-10-24T23:59:59+09:00';
+        $from = FictionalOdptTimetable::flight('ZZ1002', '10:00', '10:40');
+
+        $result = $this->mapper->map(Direction::Arrival, [
+            FictionalOdptTimetable::record('ZZZ', 'TKN', 'Monday', [$until, $from]),
+        ], new \DateTimeImmutable());
+
+        self::assertCount(2, $result->entries);
     }
 
     /**
@@ -122,6 +161,11 @@ final class OdptTimetableMapperTest extends TestCase
         yield 'not an array' => [Direction::Departure, 'Require acl:consumerKey.'];
         yield 'object instead of list' => [Direction::Departure, ['a' => $departure]];
         yield 'empty array' => [Direction::Departure, []];
+        yield 'no flights in any record' => [Direction::Departure, [
+            FictionalOdptTimetable::record('TKN', 'ZZZ', 'Monday', []),
+            FictionalOdptTimetable::record('TKN', 'ZZZ', 'Tuesday', []),
+        ]];
+        yield 'flights key missing' => [Direction::Departure, $withoutRecord('odpt:flightScheduleObject')];
         yield 'possibly truncated' => [Direction::Departure, array_fill(0, OdptTimetableMapper::RECORD_LIMIT, $departure)];
         yield 'record is not an object' => [Direction::Departure, ['x']];
         yield 'wrong @type' => [Direction::Departure, $withRecord('@type', 'odpt:FlightInformationDeparture')];
@@ -129,6 +173,8 @@ final class OdptTimetableMapperTest extends TestCase
         yield 'dc:date missing' => [Direction::Departure, $withoutRecord('dc:date')];
         yield 'dc:date without time zone' => [Direction::Departure, $withRecord('dc:date', '2026-08-21T13:00:00')];
         yield 'dc:date overflowing' => [Direction::Departure, $withRecord('dc:date', '2026-02-30T13:00:00+09:00')];
+        yield 'dc:date offset out of range' => [Direction::Departure, $withRecord('dc:date', '2026-08-21T13:00:00+99:99')];
+        yield 'dc:date offset other than JST or UTC' => [Direction::Departure, $withRecord('dc:date', '2026-08-21T13:00:00-05:00')];
         yield 'dc:date trailing newline' => [Direction::Departure, $withRecord('dc:date', "2026-08-21T13:00:00+09:00\n")];
         yield 'origin airport invalid' => [Direction::Departure, $withRecord('odpt:originAirport', 'odpt.Airport:tkn')];
         yield 'destination airport missing' => [Direction::Departure, $withoutRecord('odpt:destinationAirport')];
@@ -149,6 +195,10 @@ final class OdptTimetableMapperTest extends TestCase
         yield 'valid from missing' => [Direction::Departure, $withoutFlightValue('odpt:isValidFrom')];
         yield 'valid to without time zone' => [Direction::Departure, $withFlightValue('odpt:isValidTo', '2027-01-04T23:59:59')];
         yield 'valid from after valid to' => [Direction::Departure, $withFlightValue('odpt:isValidFrom', '2027-01-05T00:00:00+09:00')];
+        yield 'overlapping periods of one flight' => [Direction::Departure, [FictionalOdptTimetable::record('TKN', 'ZZZ', 'Monday', [
+            $flight,
+            array_replace($flight, ['odpt:originTime' => '10:00', 'odpt:isValidFrom' => '2027-01-04T00:00:00+09:00']),
+        ])]];
         yield 'day difference not an integer' => [Direction::Departure, $withFlightValue('odpt:destinationDayDifference', '1')];
         yield 'note as plain string' => [Direction::Departure, $withFlightValue('odpt:note', 'テスト用の備考')];
         yield 'note without Japanese' => [Direction::Departure, $withFlightValue('odpt:note', ['en' => 'test note'])];
