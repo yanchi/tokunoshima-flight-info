@@ -21,6 +21,8 @@ services:
     # this creates a service per class whose id is the fully-qualified class name
     App\:
         resource: '../src/'
+        exclude:
+            - '../src/Infrastructure/Persistence/Doctrine/Entity/'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -60,4 +62,8 @@ when@test:
         # test container would drop it and the wiring test could not reach it.
         test.odpt_timetable_client:
             alias: App\Infrastructure\Provider\Odpt\OdptTimetableClient
+            public: true
+        # Same reason: the sync command that will use it does not exist yet.
+        test.timetable_repository:
+            alias: App\Application\Port\TimetableRepositoryInterface
             public: true
