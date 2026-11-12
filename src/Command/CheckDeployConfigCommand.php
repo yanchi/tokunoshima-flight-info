@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Domain\Flight\TimetableFreshnessPolicy;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -33,6 +34,7 @@ final class CheckDeployConfigCommand extends Command
         private readonly string $appSecret,
         #[Autowire(env: 'CONTACT_ADDRESS')]
         private readonly string $contactAddress,
+        private readonly TimetableFreshnessPolicy $timetableFreshnessPolicy,
     ) {
         parent::__construct();
     }
@@ -57,8 +59,13 @@ final class CheckDeployConfigCommand extends Command
             $missing[] = 'CONTACT_ADDRESS';
         }
 
+        // Checked at run time as well; this only catches it earlier (§7 step 7).
+        if (!$this->timetableFreshnessPolicy->isValid()) {
+            $missing[] = 'TIMETABLE_WARN_AFTER_SECONDS / TIMETABLE_SUSPEND_AFTER_SECONDS';
+        }
+
         if ([] !== $missing) {
-            $errorOutput->writeln(\sprintf('<error>Unset settings (empty or placeholder): %s</error>', implode(', ', $missing)));
+            $errorOutput->writeln(\sprintf('<error>Unset or invalid settings (empty, placeholder or out of range): %s</error>', implode(', ', $missing)));
 
             return Command::FAILURE;
         }

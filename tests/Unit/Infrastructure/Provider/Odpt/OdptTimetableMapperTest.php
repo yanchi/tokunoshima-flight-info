@@ -279,4 +279,20 @@ final class OdptTimetableMapperTest extends TestCase
             ]),
         ], new \DateTimeImmutable());
     }
+
+    /**
+     * A decoded JSON response is always valid UTF-8, so this cannot come
+     * from the API; the check keeps saved data hashable whatever the source.
+     */
+    public function testUnhashableNoteFailsTheWholeDirection(): void
+    {
+        $this->expectException(TimetableFetchFailed::class);
+        $this->expectExceptionMessage('compared items cannot be hashed');
+
+        $this->mapper->map(Direction::Departure, [
+            FictionalOdptTimetable::record('TKN', 'ZZZ', 'Monday', [
+                FictionalOdptTimetable::flight('ZZ1001', '09:00', '09:40', ['ja' => "\xff"]),
+            ]),
+        ], new \DateTimeImmutable());
+    }
 }

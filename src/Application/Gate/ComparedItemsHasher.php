@@ -44,6 +44,8 @@ final class ComparedItemsHasher
      * @param list<TimetableEntry> $entries all stored entries of one direction
      *
      * @return string 64 lowercase hex digits
+     *
+     * @throws \JsonException when a text value is not valid UTF-8
      */
     public function hash(ComparedPeriod $period, array $entries): string
     {

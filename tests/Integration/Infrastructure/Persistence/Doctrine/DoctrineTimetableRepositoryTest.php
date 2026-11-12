@@ -21,6 +21,8 @@ use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\SchemaTool;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\MockClock;
+use Symfony\Component\Clock\Test\ClockSensitiveTrait;
 
 /**
  * TEST ONLY data: the ZZ designator and ZZZ airport are placeholders, so
@@ -28,11 +30,17 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
  */
 final class DoctrineTimetableRepositoryTest extends KernelTestCase
 {
+    use ClockSensitiveTrait;
+
+    /** Later than every fixture's fetch time, so none of them is in the future. */
+    private const NOW = '2026-11-13T00:00:00Z';
+
     private TimetableRepositoryInterface $repository;
     private EntityManagerInterface $entityManager;
 
     protected function setUp(): void
     {
+        self::mockTime(self::NOW);
         $container = self::getContainer();
         $entityManager = $container->get(EntityManagerInterface::class);
         $this->entityManager = $entityManager;
@@ -58,7 +66,7 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
             self::entry('ZZ1003', 'TKN', 'ZZZ', Weekday::Sunday, '15:00', '15:40', note: 'テスト用の備考', originDayDifference: 0, destinationDayDifference: 0),
         ]);
 
-        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($saved));
+        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($saved)->outcome);
         $this->entityManager->clear();
 
         $found = $this->repository->findLatest(Direction::Departure);
@@ -119,7 +127,7 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
             self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
         ], latestDataDate: '2026-11-12T12:30:00+09:00', recordCount: 1);
 
-        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($newer));
+        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($newer)->outcome);
         $this->entityManager->clear();
 
         // Earlier fetches are not kept (§9 M1).
@@ -136,7 +144,10 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
             self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
         ]);
 
-        self::assertSame(TimetableSaveOutcome::NotNewerThanStored, $this->repository->save($older));
+        $saved = $this->repository->save($older);
+        self::assertSame(TimetableSaveOutcome::OlderThanStored, $saved->outcome);
+        self::assertNotNull($saved->previous);
+        self::assertSame(self::described($stored), self::described($saved->previous));
         $this->entityManager->clear();
         self::assertSame(self::described($stored), self::described($this->latest(Direction::Departure)));
     }
@@ -150,7 +161,7 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
             self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
         ]);
 
-        self::assertSame(TimetableSaveOutcome::NotNewerThanStored, $this->repository->save($sameSecond));
+        self::assertSame(TimetableSaveOutcome::SameSecondAsStored, $this->repository->save($sameSecond)->outcome);
         $this->entityManager->clear();
         self::assertSame(self::described($stored)['entries'], self::described($this->latest(Direction::Departure))['entries']);
     }
@@ -163,7 +174,7 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
             self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
         ]);
 
-        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($nextSecond));
+        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($nextSecond)->outcome);
         $this->entityManager->clear();
         self::assertSame(self::described($nextSecond), self::described($this->latest(Direction::Departure)));
     }
@@ -182,12 +193,12 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
         $newer = self::departures('2026-11-12T05:00:00Z', [
             self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
         ]);
-        self::assertSame(TimetableSaveOutcome::Saved, new DoctrineTimetableRepository($otherEntityManager)->save($newer));
+        self::assertSame(TimetableSaveOutcome::Saved, new DoctrineTimetableRepository($otherEntityManager, new MockClock(self::NOW), self::getContainer()->get('doctrine'))->save($newer)->outcome);
         $otherConnection->close();
 
         // No clear(): the stale managed record must not be trusted.
         $older = self::departures('2026-11-12T04:00:00Z');
-        self::assertSame(TimetableSaveOutcome::NotNewerThanStored, $this->repository->save($older));
+        self::assertSame(TimetableSaveOutcome::OlderThanStored, $this->repository->save($older)->outcome);
 
         $this->entityManager->clear();
         self::assertSame(self::described($newer), self::described($this->latest(Direction::Departure)));
@@ -206,7 +217,7 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
             1,
             [self::entry('ZZ1002', 'ZZZ', 'TKN', Weekday::Monday, '10:30', '11:10')],
         );
-        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($arrivals));
+        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($arrivals)->outcome);
         $this->repository->save(self::departures('2026-11-12T05:00:00Z'));
         $this->entityManager->clear();
 
@@ -238,10 +249,145 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
             self::assertStringContainsString('rejected by test', $e->getMessage());
         }
 
-        // The failed transaction closes the entity manager.
-        self::getContainer()->get('doctrine')->resetManager();
+        // The repository resets the closed entity manager itself, so the
+        // other direction can still be saved in the same run.
+        self::assertSame(self::described($stored), self::described($this->latest(Direction::Departure)));
+        $arrivals = self::arrivals('2026-11-12T04:00:00Z');
+        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($arrivals)->outcome);
+    }
+
+    public function testCallbackRunsInsideTheTransactionWithThePreviousFetch(): void
+    {
+        $stored = self::departures('2026-11-12T03:00:00Z');
+        $this->repository->save($stored);
+
+        $seen = [];
+        $connection = $this->entityManager->getConnection();
+        $this->repository->save(self::departures('2026-11-12T04:00:00Z'), static function (?TimetableFetchResult $previous) use (&$seen, $connection): void {
+            $seen[] = [$previous, $connection->isTransactionActive()];
+        });
+
+        self::assertCount(1, $seen);
+        self::assertNotNull($seen[0][0]);
+        self::assertSame(self::described($stored), self::described($seen[0][0]));
+        self::assertTrue($seen[0][1]);
+    }
+
+    public function testCallbackGetsNullForTheFirstFetch(): void
+    {
+        $seen = [];
+        $this->repository->save(self::departures('2026-11-12T03:00:00Z'), static function (?TimetableFetchResult $previous) use (&$seen): void {
+            $seen[] = $previous;
+        });
+
+        self::assertSame([null], $seen);
+    }
+
+    public function testCallbackIsNotCalledWhenNothingIsReplaced(): void
+    {
+        $this->repository->save(self::departures('2026-11-12T04:00:00Z'));
+
+        $called = false;
+        $this->repository->save(self::departures('2026-11-12T03:00:00Z'), static function () use (&$called): void {
+            $called = true;
+        });
+
+        self::assertFalse($called);
+    }
+
+    public function testThrowingCallbackRollsTheReplacementBack(): void
+    {
+        $stored = self::departures('2026-11-12T03:00:00Z');
+        $this->repository->save($stored);
+
+        try {
+            $this->repository->save(self::departures('2026-11-12T04:00:00Z', [
+                self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
+            ]), static function (): void {
+                throw new \JsonException('TEST ONLY');
+            });
+            self::fail('The save should have failed.');
+        } catch (\JsonException) {
+        }
 
         self::assertSame(self::described($stored), self::described($this->latest(Direction::Departure)));
+        self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save(self::arrivals('2026-11-12T04:00:00Z'))->outcome);
+    }
+
+    public function testFirstSaveHasNoPreviousFetchAndIsJudgedAtTheClockTime(): void
+    {
+        $saved = $this->repository->save(self::departures('2026-11-12T03:00:00Z'));
+
+        self::assertSame(TimetableSaveOutcome::Saved, $saved->outcome);
+        self::assertNull($saved->previous);
+        self::assertSame(new \DateTimeImmutable(self::NOW)->getTimestamp(), $saved->judgedAt->getTimestamp());
+    }
+
+    public function testReplacingReturnsThePreviousFetch(): void
+    {
+        $stored = self::departures('2026-11-12T03:00:00Z');
+        $this->repository->save($stored);
+
+        $saved = $this->repository->save(self::departures('2026-11-12T04:00:00Z', [
+            self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
+        ]));
+
+        self::assertSame(TimetableSaveOutcome::Saved, $saved->outcome);
+        self::assertNotNull($saved->previous);
+        self::assertSame(self::described($stored), self::described($saved->previous));
+    }
+
+    public function testFetchDatedAfterTheJudgmentReplacesNothing(): void
+    {
+        $stored = self::departures('2026-11-12T03:00:00Z');
+        $this->repository->save($stored);
+
+        // The clock was set back mid-fetch.
+        $saved = $this->repository->save(self::departures('2026-11-13T00:00:01Z', [
+            self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
+        ]));
+
+        self::assertSame(TimetableSaveOutcome::CurrentFetchInFuture, $saved->outcome);
+        $this->entityManager->clear();
+        self::assertSame(self::described($stored), self::described($this->latest(Direction::Departure)));
+    }
+
+    public function testFirstFetchDatedAfterTheJudgmentIsNotSaved(): void
+    {
+        $saved = $this->repository->save(self::departures('2026-11-13T00:00:01Z'));
+
+        self::assertSame(TimetableSaveOutcome::CurrentFetchInFuture, $saved->outcome);
+        self::assertNull($this->repository->findLatest(Direction::Departure));
+    }
+
+    public function testStoredRecordInTheFutureIsReplacedByAnEarlierFetch(): void
+    {
+        $this->repository->save(self::departures('2026-11-12T03:00:00Z'));
+        $this->entityManager->getConnection()->executeStatement(
+            "UPDATE timetable_fetch_record SET request_started_at = '2026-11-20 00:00:00'",
+        );
+        $this->entityManager->clear();
+
+        $current = self::departures('2026-11-12T04:00:00Z', [
+            self::entry('ZZ1005', 'TKN', 'ZZZ', Weekday::Tuesday, '10:00', '10:40'),
+        ]);
+        $saved = $this->repository->save($current);
+
+        self::assertSame(TimetableSaveOutcome::SavedOverFutureRecord, $saved->outcome);
+        $this->entityManager->clear();
+        self::assertSame(self::described($current), self::described($this->latest(Direction::Departure)));
+    }
+
+    public function testStoredRecordOnlyJustNotInTheFutureIsJudgedNormally(): void
+    {
+        $this->repository->save(self::departures('2026-11-12T03:00:00Z'));
+        $this->entityManager->getConnection()->executeStatement(
+            "UPDATE timetable_fetch_record SET request_started_at = '2026-11-13 00:00:00'",
+        );
+        $this->entityManager->clear();
+
+        // Equal to now is not the future, so the older fetch replaces nothing.
+        self::assertSame(TimetableSaveOutcome::OlderThanStored, $this->repository->save(self::departures('2026-11-12T04:00:00Z'))->outcome);
     }
 
     private function latest(Direction $direction): TimetableFetchResult
@@ -258,6 +404,17 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
         self::assertIsNumeric($count);
 
         return (int) $count;
+    }
+
+    private static function arrivals(string $requestStartedAt): TimetableFetchResult
+    {
+        return new TimetableFetchResult(
+            Direction::Arrival,
+            new \DateTimeImmutable($requestStartedAt)->setTimezone(new \DateTimeZone('UTC')),
+            new \DateTimeImmutable('2026-08-21T13:00:00+09:00'),
+            1,
+            [self::entry('ZZ1002', 'ZZZ', 'TKN', Weekday::Monday, '10:30', '11:10')],
+        );
     }
 
     /**

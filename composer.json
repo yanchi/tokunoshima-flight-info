@@ -16,6 +16,8 @@
         "symfony/flex": "^2.12",
         "symfony/framework-bundle": "7.4.*",
         "symfony/http-client": "7.4.*",
+        "symfony/lock": "7.4.*",
+        "symfony/monolog-bundle": "^4.1",
         "symfony/runtime": "7.4.*",
         "symfony/twig-bundle": "7.4.*",
         "symfony/yaml": "7.4.*"
