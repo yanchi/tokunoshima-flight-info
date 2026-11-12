@@ -46,8 +46,8 @@ final class OdptTimetableMapperTest extends TestCase
         self::assertSame(Weekday::Monday, $first->weekday);
         self::assertSame('09:00', $first->originTime);
         self::assertSame('09:40', $first->destinationTime);
-        self::assertSame('2026-10-25T00:00:00+09:00', $first->validFrom->format(\DATE_ATOM));
-        self::assertSame('2027-01-04T23:59:59+09:00', $first->validTo->format(\DATE_ATOM));
+        self::assertSame('2026-10-25', $first->validFrom->toString());
+        self::assertSame('2027-01-04', $first->validTo->toString());
         self::assertSame('odpt.Operator:JAL', $first->airline);
         self::assertNull($first->note);
 
@@ -127,6 +127,32 @@ final class OdptTimetableMapperTest extends TestCase
         self::assertCount(2, $result->entries);
     }
 
+    public function testOneDayPeriodIsAllowed(): void
+    {
+        $flight = FictionalOdptTimetable::flight('ZZ1002', '10:30', '11:10');
+        $flight['odpt:isValidFrom'] = '2026-11-01T00:00:00+09:00';
+        $flight['odpt:isValidTo'] = '2026-11-01T23:59:59+09:00';
+
+        $result = $this->mapper->map(Direction::Arrival, [
+            FictionalOdptTimetable::record('ZZZ', 'TKN', 'Monday', [$flight]),
+        ], new \DateTimeImmutable());
+
+        self::assertSame('2026-11-01', $result->entries[0]->validFrom->toString());
+        self::assertSame('2026-11-01', $result->entries[0]->validTo->toString());
+    }
+
+    public function testDifferentFlightsOnTheSameDaysAreAllowed(): void
+    {
+        $result = $this->mapper->map(Direction::Departure, [
+            FictionalOdptTimetable::record('TKN', 'ZZZ', 'Monday', [
+                FictionalOdptTimetable::flight('ZZ1001', '09:00', '09:40'),
+                FictionalOdptTimetable::flight('ZZ1003', '15:00', '15:40'),
+            ]),
+        ], new \DateTimeImmutable());
+
+        self::assertCount(2, $result->entries);
+    }
+
     /**
      * @return iterable<string, array{Direction, mixed}>
      */
@@ -186,6 +212,11 @@ final class OdptTimetableMapperTest extends TestCase
         yield 'destination time with seconds' => [Direction::Departure, $withFlightValue('odpt:destinationTime', '09:40:00')];
         yield 'valid from missing' => [Direction::Departure, $withoutFlightValue('odpt:isValidFrom')];
         yield 'valid to without time zone' => [Direction::Departure, $withFlightValue('odpt:isValidTo', '2027-01-04T23:59:59')];
+        yield 'valid from not at midnight' => [Direction::Departure, $withFlightValue('odpt:isValidFrom', '2026-10-25T00:00:01+09:00')];
+        yield 'valid from at the end of a day' => [Direction::Departure, $withFlightValue('odpt:isValidFrom', '2026-10-24T23:59:59+09:00')];
+        yield 'valid to at midnight' => [Direction::Departure, $withFlightValue('odpt:isValidTo', '2027-01-05T00:00:00+09:00')];
+        yield 'valid to part-way through a day' => [Direction::Departure, $withFlightValue('odpt:isValidTo', '2027-01-04T12:00:00+09:00')];
+        yield 'valid from in UTC' => [Direction::Departure, $withFlightValue('odpt:isValidFrom', '2026-10-24T15:00:00Z')];
         yield 'valid from after valid to' => [Direction::Departure, $withFlightValue('odpt:isValidFrom', '2027-01-05T00:00:00+09:00')];
         yield 'overlapping periods of one flight' => [Direction::Departure, [FictionalOdptTimetable::record('TKN', 'ZZZ', 'Monday', [
             $flight,

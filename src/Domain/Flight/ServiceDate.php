@@ -42,6 +42,16 @@ final readonly class ServiceDate
         return new self($jst->setTime(0, 0));
     }
 
+    /**
+     * Negative, zero or positive when this date is before, the same as or
+     * after the other one.
+     */
+    public function compareTo(self $other): int
+    {
+        // Y-m-d strings of four-digit years sort in date order.
+        return $this->toString() <=> $other->toString();
+    }
+
     public function equals(self $other): bool
     {
         return $this->toString() === $other->toString();

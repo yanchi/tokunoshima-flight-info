@@ -60,6 +60,16 @@ final class ServiceDateTest extends TestCase
         self::assertFalse($date->equals(ServiceDate::fromString('2026-10-28')));
     }
 
+    public function testCompareTo(): void
+    {
+        $date = ServiceDate::fromString('2026-10-27');
+
+        self::assertLessThan(0, $date->compareTo(ServiceDate::fromString('2026-10-28')));
+        self::assertSame(0, $date->compareTo(ServiceDate::fromString('2026-10-27')));
+        self::assertGreaterThan(0, $date->compareTo(ServiceDate::fromString('2026-09-30')));
+        self::assertLessThan(0, ServiceDate::fromString('2026-12-31')->compareTo(ServiceDate::fromString('2027-01-01')));
+    }
+
     public function testToDateTimeIsJstMidnight(): void
     {
         self::assertSame(

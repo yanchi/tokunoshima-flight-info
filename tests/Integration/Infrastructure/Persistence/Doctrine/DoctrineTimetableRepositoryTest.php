@@ -11,6 +11,7 @@ use App\Application\Port\TimetableSaveOutcome;
 use App\Domain\Flight\AirportCode;
 use App\Domain\Flight\Direction;
 use App\Domain\Flight\FlightNumber;
+use App\Domain\Flight\ServiceDate;
 use App\Domain\Flight\Weekday;
 use App\Infrastructure\Persistence\Doctrine\DoctrineTimetableRepository;
 use Doctrine\DBAL\DriverManager;
@@ -268,8 +269,8 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
             $destinationTime,
             $originDayDifference,
             $destinationDayDifference,
-            new \DateTimeImmutable('2026-10-25T00:00:00+09:00'),
-            new \DateTimeImmutable('2027-01-04T23:59:59+09:00'),
+            ServiceDate::fromString('2026-10-25'),
+            ServiceDate::fromString('2027-01-04'),
             $note,
             'odpt.Operator:ZZ',
         );
@@ -298,8 +299,8 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
                 $entry->destinationTime,
                 $entry->originDayDifference,
                 $entry->destinationDayDifference,
-                $entry->validFrom->format('Y-m-d\TH:i:s.uP'),
-                $entry->validTo->format('Y-m-d\TH:i:s.uP'),
+                $entry->validFrom->toString(),
+                $entry->validTo->toString(),
                 $entry->note,
                 $entry->airline,
             ], $result->entries),

@@ -10,6 +10,7 @@ use App\Application\Port\TimetableFetchFailed;
 use App\Domain\Flight\AirportCode;
 use App\Domain\Flight\Direction;
 use App\Domain\Flight\FlightNumber;
+use App\Domain\Flight\ServiceDate;
 use App\Domain\Flight\Weekday;
 
 /**
@@ -35,9 +36,9 @@ final class OdptTimetableMapper
         'odpt.Calendar:Saturday' => Weekday::Saturday,
         'odpt.Calendar:Sunday' => Weekday::Sunday,
     ];
-    // JST offset only: the verified data uses +09:00 throughout, the JST
-    // calendar day of other offsets is not defined yet (§7 step 7), and
-    // createFromFormat() accepts nonsense such as +99:99.
+    // JST offset only: the verified data uses +09:00 throughout, other
+    // offsets are rejected by the JST calendar-day definition (§7 step 7),
+    // and createFromFormat() accepts nonsense such as +99:99.
     private const DATE_TIME_PATTERN = '/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00\z/';
     private const TIME_PATTERN = '/\A(?:[01]\d|2[0-3]):[0-5]\d\z/';
 
@@ -139,9 +140,9 @@ final class OdptTimetableMapper
             throw $this->fail($direction, $at.' is not an object');
         }
 
-        $validFrom = $this->dateTime($direction, $object, 'odpt:isValidFrom', $at);
-        $validTo = $this->dateTime($direction, $object, 'odpt:isValidTo', $at);
-        if ($validFrom > $validTo) {
+        $validFrom = $this->calendarDay($direction, $object, 'odpt:isValidFrom', '00:00:00', $at);
+        $validTo = $this->calendarDay($direction, $object, 'odpt:isValidTo', '23:59:59', $at);
+        if ($validFrom->compareTo($validTo) > 0) {
             throw $this->fail($direction, $at.' has odpt:isValidFrom after odpt:isValidTo');
         }
 
@@ -165,7 +166,8 @@ final class OdptTimetableMapper
      * The same flight number may appear several times in one record, once
      * per period (e.g. a timetable change). Overlapping periods would put
      * the flight on the same day at two times, and which one is right
-     * cannot be decided, so they fail.
+     * cannot be decided, so they fail. Periods are compared as JST
+     * calendar days, both ends inclusive.
      *
      * @param list<TimetableEntry> $entries entries of one record
      */
@@ -173,7 +175,7 @@ final class OdptTimetableMapper
     {
         foreach ($entries as $i => $a) {
             foreach (\array_slice($entries, $i + 1) as $b) {
-                if ($a->flightNumber->equals($b->flightNumber) && $a->validFrom <= $b->validTo && $b->validFrom <= $a->validTo) {
+                if ($a->flightNumber->equals($b->flightNumber) && $a->validFrom->compareTo($b->validTo) <= 0 && $b->validFrom->compareTo($a->validTo) <= 0) {
                     throw $this->fail($direction, \sprintf('%s has overlapping periods for one flight number', $at));
                 }
             }
@@ -230,6 +232,25 @@ final class OdptTimetableMapper
         // Other calendars (holidays, specific days) are not in the verified
         // data; failing keeps them from being read as a weekday.
         throw $this->fail($direction, $at.' has an unsupported odpt:calendar');
+    }
+
+    /**
+     * JST calendar day of a period end (§7 step 7). Only a whole day is
+     * accepted: the start must be at 00:00:00 and the end at 23:59:59, so
+     * that a period never starts or ends part-way through a day, which
+     * would leave it unclear whether that day is in the period.
+     *
+     * @param array<mixed> $object
+     */
+    private function calendarDay(Direction $direction, array $object, string $key, string $timeOfDay, string $at): ServiceDate
+    {
+        $value = $this->dateTime($direction, $object, $key, $at);
+        if ($timeOfDay !== $value->format('H:i:s')) {
+            throw $this->fail($direction, \sprintf('%s has an %s that is not at %s', $at, $key, $timeOfDay));
+        }
+
+        // The offset is +09:00 (dateTime()), so this is the date as written.
+        return ServiceDate::fromInstant($value);
     }
 
     /**
