@@ -28,7 +28,7 @@ final class TimetableFreshnessPolicyTest extends TestCase
         yield 'one second past the stop threshold' => ['2026-11-12T02:56:39+00:00', TimetableFreshness::Suspended];
         yield 'one second in the future' => ['2026-11-12T03:00:01+00:00', TimetableFreshness::FutureDated];
         yield 'a fraction of a second in the future' => ['2026-11-12T03:00:00.5+00:00', TimetableFreshness::FutureDated];
-        yield 'half a second under the warning threshold, now with a fraction' => ['2026-11-12T02:58:20.5+00:00', TimetableFreshness::Fresh];
+        yield 'half a second under the warning threshold, fetched at a fraction' => ['2026-11-12T02:58:20.5+00:00', TimetableFreshness::Fresh];
         yield 'same instant in JST' => ['2026-11-12T12:00:00+09:00', TimetableFreshness::Fresh];
     }
 

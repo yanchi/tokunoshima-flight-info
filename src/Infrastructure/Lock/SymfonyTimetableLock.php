@@ -26,9 +26,11 @@ final readonly class SymfonyTimetableLock implements TimetableLockInterface
 
     public function runExclusively(callable $callback): mixed
     {
-        // No TTL and no release on destruct: a flock is freed by the OS when
-        // the process ends, and a release that already failed below must not
-        // be retried, and throw, from a destructor.
+        // No TTL and no release on destruct, so a release that already failed
+        // below is not retried, and thrown, from a destructor. This assumes
+        // the flock store (LOCK_DSN=flock): its file handle is closed, and the
+        // lock freed, when the lock's key is destroyed. Other stores may keep
+        // a lock whose release failed until the process ends.
         $lock = $this->lockFactory->createLock(self::NAME, null, false);
         if (!$lock->acquire(false)) {
             throw new TimetableLockUnavailable('The timetable lock is held by another process.');

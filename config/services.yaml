@@ -85,6 +85,8 @@ when@test:
         # (CLAUDE.md §9): without a key the client refuses before any request
         # (OdptTimetableClientTest). The HTTP client itself stays the
         # production one, so OdptHttpClientWiringTest still checks it.
+        # Keep every argument except $consumerKey the same as the production
+        # definition above.
         App\Infrastructure\Provider\Odpt\OdptTimetableClient:
             autowire: true
             arguments:
