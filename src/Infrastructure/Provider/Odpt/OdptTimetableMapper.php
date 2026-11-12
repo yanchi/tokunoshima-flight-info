@@ -146,13 +146,22 @@ final class OdptTimetableMapper
             throw $this->fail($direction, $at.' has odpt:isValidFrom after odpt:isValidTo');
         }
 
+        $originTime = $this->time($direction, $object, 'odpt:originTime', $at);
+        $destinationTime = $this->time($direction, $object, 'odpt:destinationTime', $at);
+        // Without a day difference, an arrival before the departure can only
+        // be read as crossing midnight, which is not accepted yet (see
+        // dayDifference()). "HH:MM" strings sort in time order.
+        if ($destinationTime < $originTime) {
+            throw $this->fail($direction, $at.' arrives before it departs and may cross midnight');
+        }
+
         return new TimetableEntry(
             $this->flightNumber($direction, $object, $at),
             $origin,
             $destination,
             $weekday,
-            $this->time($direction, $object, 'odpt:originTime', $at),
-            $this->time($direction, $object, 'odpt:destinationTime', $at),
+            $originTime,
+            $destinationTime,
             $this->dayDifference($direction, $object, 'odpt:originDayDifference', $at),
             $this->dayDifference($direction, $object, 'odpt:destinationDayDifference', $at),
             $validFrom,
@@ -292,6 +301,8 @@ final class OdptTimetableMapper
      * Only flights on a single day pass (null or 0). Whether the period's
      * calendar days are departure or arrival days is not decided, and both
      * give the same days only when nothing crosses midnight (§7 step 7).
+     * A missing or null value is read as a same-day flight, an assumption
+     * from the observed data; the time order is checked in entry().
      *
      * @param array<mixed> $object
      */
@@ -299,7 +310,7 @@ final class OdptTimetableMapper
     {
         $value = $this->optionalInt($direction, $object, $key, $at);
         if (null !== $value && 0 !== $value) {
-            throw $this->fail($direction, \sprintf('%s has a %s other than 0', $at, $key));
+            throw $this->fail($direction, \sprintf('%s has a non-zero %s', $at, $key));
         }
 
         return $value;

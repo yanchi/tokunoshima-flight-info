@@ -55,7 +55,7 @@ final class DoctrineTimetableRepositoryTest extends KernelTestCase
     {
         $saved = self::departures('2026-11-12T03:00:00Z', [
             self::entry('ZZ1001', 'TKN', 'ZZZ', Weekday::Monday, '09:00', '09:40'),
-            self::entry('ZZ1003', 'TKN', 'ZZZ', Weekday::Sunday, '15:00', '15:40', note: 'テスト用の備考', originDayDifference: 0, destinationDayDifference: 1),
+            self::entry('ZZ1003', 'TKN', 'ZZZ', Weekday::Sunday, '15:00', '15:40', note: 'テスト用の備考', originDayDifference: 0, destinationDayDifference: 0),
         ]);
 
         self::assertSame(TimetableSaveOutcome::Saved, $this->repository->save($saved));

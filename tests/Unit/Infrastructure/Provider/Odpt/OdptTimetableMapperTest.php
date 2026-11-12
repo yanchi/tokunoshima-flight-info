@@ -127,6 +127,29 @@ final class OdptTimetableMapperTest extends TestCase
         self::assertCount(2, $result->entries);
     }
 
+    /**
+     * @return iterable<string, array{array<string, mixed>, string}>
+     */
+    public static function midnightCrossings(): iterable
+    {
+        yield 'day difference' => [['odpt:destinationDayDifference' => 1], 'has a non-zero odpt:destinationDayDifference'];
+        yield 'time order' => [['odpt:originTime' => '23:30', 'odpt:destinationTime' => '00:10'], 'arrives before it departs'];
+    }
+
+    /**
+     * @param array<string, mixed> $values
+     */
+    #[DataProvider('midnightCrossings')]
+    public function testFlightCrossingMidnightFailsForThatReason(array $values, string $reason): void
+    {
+        $flight = array_replace(FictionalOdptTimetable::flight('ZZ1001', '09:00', '09:40'), $values);
+
+        $this->expectException(TimetableFetchFailed::class);
+        $this->expectExceptionMessage($reason);
+
+        $this->mapper->map(Direction::Departure, [FictionalOdptTimetable::record('TKN', 'ZZZ', 'Monday', [$flight])], new \DateTimeImmutable());
+    }
+
     public function testOneDayPeriodIsAllowed(): void
     {
         $flight = FictionalOdptTimetable::flight('ZZ1002', '10:30', '11:10');
@@ -223,6 +246,7 @@ final class OdptTimetableMapperTest extends TestCase
             array_replace($flight, ['odpt:originTime' => '10:00', 'odpt:isValidFrom' => '2027-01-04T00:00:00+09:00']),
         ])]];
         yield 'destination crossing midnight' => [Direction::Departure, $withFlightValue('odpt:destinationDayDifference', 1)];
+        yield 'arrival before departure without day difference' => [Direction::Departure, [$withFlight(array_replace($flight, ['odpt:originTime' => '23:30', 'odpt:destinationTime' => '00:10']))]];
         yield 'origin on the day before' => [Direction::Departure, $withFlightValue('odpt:originDayDifference', -1)];
         yield 'day difference not an integer' => [Direction::Departure, $withFlightValue('odpt:destinationDayDifference', '1')];
         yield 'note as plain string' => [Direction::Departure, $withFlightValue('odpt:note', 'テスト用の備考')];
