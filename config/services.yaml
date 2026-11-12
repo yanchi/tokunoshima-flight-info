@@ -9,6 +9,7 @@
 parameters:
     # Lets the app boot from real environment variables without a .env file.
     env(CONTACT_ADDRESS): ''
+    env(ODPT_CONSUMER_KEY): ''
 
 services:
     # default configuration for services in *this* file
@@ -28,7 +29,35 @@ services:
         arguments:
             $maxAgeSeconds: '%env(int:FLIGHT_DATA_MAX_AGE_SECONDS)%'
 
+    # The ODPT consumer key is part of the request URL. The framework's
+    # http_client logs every URL (CurlHttpClient: 'Request: "GET <url>"'),
+    # so ODPT gets its own client created without a logger (CLAUDE.md §8).
+    odpt.http_client:
+        class: Symfony\Contracts\HttpClient\HttpClientInterface
+        factory: ['Symfony\Component\HttpClient\HttpClient', 'create']
+        arguments: [{ max_redirects: 0 }]
+        # The declared class is an interface, so autoconfiguration's
+        # LoggerAware rule does not match today. Kept as a safeguard in
+        # case the class is changed to a concrete client.
+        autoconfigure: false
+
+    App\Infrastructure\Provider\Odpt\OdptTimetableClient:
+        arguments:
+            $httpClient: '@odpt.http_client'
+            $consumerKey: '%env(ODPT_CONSUMER_KEY)%'
+
+    App\Application\Port\TimetableProviderInterface:
+        alias: App\Infrastructure\Provider\Odpt\OdptTimetableProvider
+
     # No data source is approved yet (CLAUDE.md §7), so the board reads from
     # a repository that never has data.
     App\Application\Port\FlightBoardRepositoryInterface:
         alias: App\Infrastructure\Persistence\NoDataFlightBoardRepository
+
+when@test:
+    services:
+        # Test-only handle: nothing uses the client yet, so the compiled
+        # test container would drop it and the wiring test could not reach it.
+        test.odpt_timetable_client:
+            alias: App\Infrastructure\Provider\Odpt\OdptTimetableClient
+            public: true
