@@ -133,7 +133,8 @@ final class OdptTimetableMapperTest extends TestCase
     public static function midnightCrossings(): iterable
     {
         yield 'day difference' => [['odpt:destinationDayDifference' => 1], 'has a non-zero odpt:destinationDayDifference'];
-        yield 'time order' => [['odpt:originTime' => '23:30', 'odpt:destinationTime' => '00:10'], 'arrives before it departs'];
+        yield 'time order' => [['odpt:originTime' => '23:30', 'odpt:destinationTime' => '00:10'], 'does not arrive after it departs'];
+        yield 'same time' => [['odpt:originTime' => '09:00', 'odpt:destinationTime' => '09:00'], 'does not arrive after it departs'];
     }
 
     /**

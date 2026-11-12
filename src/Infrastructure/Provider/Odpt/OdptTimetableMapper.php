@@ -148,11 +148,13 @@ final class OdptTimetableMapper
 
         $originTime = $this->time($direction, $object, 'odpt:originTime', $at);
         $destinationTime = $this->time($direction, $object, 'odpt:destinationTime', $at);
-        // Without a day difference, an arrival before the departure can only
-        // be read as crossing midnight, which is not accepted yet (see
-        // dayDifference()). "HH:MM" strings sort in time order.
-        if ($destinationTime < $originTime) {
-            throw $this->fail($direction, $at.' arrives before it departs and may cross midnight');
+        // Checked regardless of the day difference. An arrival before the
+        // departure can only be read as crossing midnight, which is not
+        // accepted yet (see dayDifference()); an arrival at the departure
+        // time is either broken data or 24 hours later, and neither is
+        // guessed (§7 step 7). "HH:MM" strings sort in time order.
+        if ($destinationTime <= $originTime) {
+            throw $this->fail($direction, $at.' does not arrive after it departs');
         }
 
         return new TimetableEntry(

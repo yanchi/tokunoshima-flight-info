@@ -23,19 +23,20 @@ final class Version20261112045922 extends AbstractMigration
         // 23:59:59 (to) JST. The old mapper accepted any +09:00 time, so
         // rows that the new definition would reject stop the migration
         // instead of being rounded to a day (§7 step 7).
-        // Rows crossing midnight (a non-zero day difference) are rejected by
-        // the new mapper too, so they stop the migration as well. IS NOT
+        // Rows crossing midnight (a non-zero day difference) or not arriving
+        // after they depart are rejected by the new mapper too, so they stop
+        // the migration as well. IS NOT
         // also counts values time() cannot read (NULL). The table check
         // keeps --dry-run / --write-sql working on an empty database.
         $unexpected = !$this->connection->createSchemaManager()->tablesExist(['timetable_flight']) ? 0 : (int) $this->connection->fetchOne(<<<'SQL'
             SELECT COUNT(*) FROM timetable_flight
             WHERE time(valid_from) IS NOT '15:00:00' OR time(valid_to) IS NOT '14:59:59'
                OR COALESCE(origin_day_difference, 0) <> 0 OR COALESCE(destination_day_difference, 0) <> 0
-               OR destination_time < origin_time
+               OR destination_time <= origin_time
         SQL);
         $this->abortIf(
             $unexpected > 0,
-            \sprintf('%d timetable rows have a period that is not whole JST days or cross midnight; empty timetable_flight and timetable_fetch_record and fetch again.', $unexpected),
+            \sprintf('%d timetable rows have a period that is not whole JST days or do not arrive on the same day after departure; empty timetable_flight and timetable_fetch_record and fetch again.', $unexpected),
         );
 
         // Adding 9 hours to those instants gives the JST calendar day.
