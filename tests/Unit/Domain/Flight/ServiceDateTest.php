@@ -77,4 +77,15 @@ final class ServiceDateTest extends TestCase
             ServiceDate::fromString('2026-10-27')->toDateTime()->format(\DateTimeInterface::ATOM),
         );
     }
+
+    public function testAddDaysCrossesMonthAndYearEnds(): void
+    {
+        $date = ServiceDate::fromString('2026-12-31');
+
+        self::assertSame('2027-01-01', $date->addDays(1)->toString());
+        self::assertSame('2026-12-30', $date->addDays(-1)->toString());
+        self::assertSame('2026-12-31T00:00:00+09:00', $date->addDays(1)->addDays(-1)->toDateTime()->format('c'));
+        // The original is unchanged.
+        self::assertSame('2026-12-31', $date->toString());
+    }
 }

@@ -7,9 +7,11 @@ namespace App\Application\UseCase;
 use App\Application\DTO\BoardState;
 use App\Application\DTO\DailyFlightBoard;
 use App\Application\DTO\FlightRow;
+use App\Application\DTO\GuidedDateRange;
 use App\Application\DTO\NotedFlightRow;
 use App\Application\DTO\TimetableEntry;
 use App\Application\DTO\TimetableFetchResult;
+use App\Application\Gate\ComparedPeriod;
 use App\Application\Gate\TimetableGateState;
 use App\Application\Port\TimetableGateRepositoryInterface;
 use App\Application\Port\TimetableRepositoryInterface;
@@ -24,9 +26,11 @@ use Psr\Log\LoggerInterface;
 
 /**
  * Builds the departure or arrival board for one service date from the
- * stored timetable. A day is shown only when the gate publishes it and the
+ * stored timetable. A day is shown only when the gate publishes it, the
  * direction's fetch is fresh enough (docs/data-source-verification.md §7
- * step 7, §8 「画面実装への申し送り」). Writes nothing, not even the sync log.
+ * step 7, §8 「画面実装への申し送り」) and it is not before today (JST):
+ * a past day's timetable could be read as what actually flew.
+ * Writes nothing, not even the sync log.
  */
 final readonly class GetDailyFlights
 {
@@ -78,12 +82,12 @@ final readonly class GetDailyFlights
                 'exception' => $e,
             ]);
 
-            return new DailyFlightBoard($date, $direction, BoardState::ReadFailed, false, [], [], null, null);
+            return new DailyFlightBoard($date, $direction, BoardState::ReadFailed, false, [], [], null, null, null);
         }
         [$timetable, $gate] = $read;
 
         if (null === $timetable) {
-            return new DailyFlightBoard($date, $direction, BoardState::NeverFetched, false, [], [], null, null);
+            return new DailyFlightBoard($date, $direction, BoardState::NeverFetched, false, [], [], null, null, null);
         }
 
         $fetchedAt = $timetable->requestStartedAt;
@@ -101,9 +105,9 @@ final readonly class GetDailyFlights
         }
 
         // publishedPeriod() does not know about freshness; both are needed (§8).
-        $period = $gate?->publishedPeriod($direction);
-        if (null === $period || !$period->overlaps($date, $date)) {
-            return $this->board($date, $direction, BoardState::OutsidePublishedPeriod, $fetchedAt);
+        $guidedDates = self::guidedDates($gate?->publishedPeriod($direction), ServiceDate::fromInstant($now));
+        if (null === $guidedDates || !$guidedDates->contains($date)) {
+            return $this->board($date, $direction, BoardState::OutsidePublishedPeriod, $fetchedAt, $guidedDates);
         }
 
         $flights = [];
@@ -132,12 +136,26 @@ final readonly class GetDailyFlights
             $notedFlights,
             $fetchedAt,
             $this->timetableSourceName,
+            $guidedDates,
         );
     }
 
-    private function board(ServiceDate $date, Direction $direction, BoardState $state, ?\DateTimeImmutable $fetchedAt): DailyFlightBoard
+    private function board(ServiceDate $date, Direction $direction, BoardState $state, ?\DateTimeImmutable $fetchedAt, ?GuidedDateRange $guidedDates = null): DailyFlightBoard
     {
-        return new DailyFlightBoard($date, $direction, $state, false, [], [], $fetchedAt, $this->timetableSourceName);
+        return new DailyFlightBoard($date, $direction, $state, false, [], [], $fetchedAt, $this->timetableSourceName, $guidedDates);
+    }
+
+    /**
+     * The published period from today on, or null when nothing of it is
+     * left (or nothing is published).
+     */
+    private static function guidedDates(?ComparedPeriod $period, ServiceDate $today): ?GuidedDateRange
+    {
+        if (null === $period || $period->to->compareTo($today) < 0) {
+            return null;
+        }
+
+        return new GuidedDateRange($period->from->compareTo($today) > 0 ? $period->from : $today, $period->to);
     }
 
     /**

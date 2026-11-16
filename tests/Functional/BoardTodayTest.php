@@ -15,6 +15,7 @@ use App\Tests\Support\FictionalTimetable;
 use App\Tests\Support\ResetsDatabaseSchema;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\ORM\Tools\SchemaTool;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\Clock;
@@ -79,11 +80,25 @@ final class BoardTodayTest extends WebTestCase
         self::assertSelectorTextSame('#board-heading', '徳之島着（到着便）');
     }
 
-    public function testRejectsUnknownDirection(): void
+    /**
+     * The same direction inputs as FlightsPageTest::badQueries().
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function badDirections(): iterable
     {
-        $this->client->request('GET', '/?direction=sideways');
+        yield 'unknown' => ['direction=sideways'];
+        yield 'empty' => ['direction='];
+        yield 'capitalised' => ['direction=Arrival'];
+        yield 'array' => ['direction[]=arrival'];
+    }
 
-        self::assertResponseStatusCodeSame(404);
+    #[DataProvider('badDirections')]
+    public function testRejectsAMalformedDirection(string $query): void
+    {
+        $this->client->request('GET', '/?'.$query);
+
+        self::assertResponseStatusCodeSame(400);
     }
 
     public function testShowsTodayInJst(): void

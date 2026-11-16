@@ -52,6 +52,15 @@ final readonly class ServiceDate
         return $this->date <=> $other->date;
     }
 
+    /**
+     * The date the given number of days later (earlier when negative).
+     * JST has no daylight saving time, so a day is always 24 hours.
+     */
+    public function addDays(int $days): self
+    {
+        return new self($this->date->modify(\sprintf('%+d days', $days)));
+    }
+
     public function equals(self $other): bool
     {
         return $this->toString() === $other->toString();

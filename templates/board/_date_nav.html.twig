@@ -1,0 +1,32 @@
+{# Offers other days only within the guided dates (CLAUDE.md §6): from
+   today to the end of the published period. Nothing while the direction
+   is not shown at all. Expects `board` (DailyFlightBoard). #}
+{% set guided = board.guidedDates %}
+{% if guided %}
+    {% set previous_date = board.previousDate %}
+    {% set next_date = board.nextDate %}
+    {% set direction_param = board.direction.value == 'departure' ? {} : {direction: board.direction.value} %}
+    <nav class="date-nav" aria-label="日付の切り替え">
+        {% if previous_date or next_date %}
+            <ul class="date-nav-links">
+                {% if previous_date %}
+                    <li class="date-nav-previous"><a href="{{ path('board_flights', {date: previous_date.toString}|merge(direction_param)) }}"><span aria-hidden="true">← </span>前の日（{{ previous_date.toDateTime|date('n月j日') }}）</a></li>
+                {% endif %}
+                {% if next_date %}
+                    <li class="date-nav-next"><a href="{{ path('board_flights', {date: next_date.toString}|merge(direction_param)) }}">次の日（{{ next_date.toDateTime|date('n月j日') }}）<span aria-hidden="true"> →</span></a></li>
+                {% endif %}
+            </ul>
+        {% endif %}
+        <form class="date-form" method="get" action="{{ path('board_flights') }}">
+            <label for="date-input">日付を選ぶ</label>
+            <input type="date" id="date-input" name="date" required
+                value="{{ board.dateInputValue.toString }}"
+                min="{{ guided.from.toString }}" max="{{ guided.to.toString }}">
+            {% if direction_param is not empty %}
+                <input type="hidden" name="direction" value="{{ board.direction.value }}">
+            {% endif %}
+            <button type="submit">表示</button>
+        </form>
+        <p class="date-nav-range">{{ board.direction.value == 'departure' ? '出発便' : '到着便' }}を表示できる日付：{{ guided.from.toDateTime|date('Y年n月j日') }}〜{{ guided.to.toDateTime|date('Y年n月j日') }}</p>
+    </nav>
+{% endif %}
