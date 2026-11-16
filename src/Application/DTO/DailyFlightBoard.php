@@ -81,6 +81,19 @@ final readonly class DailyFlightBoard
         return $this->isPublished() && [] === $this->flights && [] === $this->notedFlights;
     }
 
+    /**
+     * The day a date input starts on: this day when it may be offered,
+     * otherwise the first guided day. Null when no date is offered.
+     */
+    public function dateInputValue(): ?ServiceDate
+    {
+        if (null === $this->guidedDates) {
+            return null;
+        }
+
+        return $this->guidedDates->contains($this->date) ? $this->date : $this->guidedDates->from;
+    }
+
     private function guidedOrNull(ServiceDate $date): ?ServiceDate
     {
         return ($this->guidedDates?->contains($date) ?? false) ? $date : null;

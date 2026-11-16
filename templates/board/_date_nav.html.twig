@@ -20,13 +20,13 @@
         <form class="date-form" method="get" action="{{ path('board_flights') }}">
             <label for="date-input">日付を選ぶ</label>
             <input type="date" id="date-input" name="date" required
-                value="{{ (guided.contains(board.date) ? board.date : guided.from).toString }}"
+                value="{{ board.dateInputValue.toString }}"
                 min="{{ guided.from.toString }}" max="{{ guided.to.toString }}">
             {% if direction_param is not empty %}
                 <input type="hidden" name="direction" value="{{ board.direction.value }}">
             {% endif %}
             <button type="submit">表示</button>
         </form>
-        <p class="date-nav-range">表示できる日付：{{ guided.from.toDateTime|date('Y年n月j日') }}〜{{ guided.to.toDateTime|date('Y年n月j日') }}</p>
+        <p class="date-nav-range">{{ board.direction.value == 'departure' ? '出発便' : '到着便' }}を表示できる日付：{{ guided.from.toDateTime|date('Y年n月j日') }}〜{{ guided.to.toDateTime|date('Y年n月j日') }}</p>
     </nav>
 {% endif %}

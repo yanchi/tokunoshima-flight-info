@@ -158,7 +158,7 @@ final class FlightsPageTest extends WebTestCase
         $input = $crawler->filter('.date-form input[type="date"]');
         self::assertSame(['2026-11-20', '2026-11-16', '2026-11-30'], [$input->attr('value'), $input->attr('min'), $input->attr('max')]);
         self::assertSame('arrival', $crawler->filter('.date-form input[name="direction"]')->attr('value'));
-        self::assertSelectorTextSame('.date-nav-range', '表示できる日付：2026年11月16日〜2026年11月30日');
+        self::assertSelectorTextSame('.date-nav-range', '到着便を表示できる日付：2026年11月16日〜2026年11月30日');
     }
 
     public function testNoNextDayOnTheLastGuidedDay(): void
@@ -191,6 +191,22 @@ final class FlightsPageTest extends WebTestCase
 
         self::assertSelectorTextSame('.board-empty', self::OUTSIDE);
         self::assertSame($links, $crawler->filter('.date-nav-links a')->each(static fn (Crawler $a): ?string => $a->attr('href')));
+    }
+
+    public function testSingleGuidedDayOffersOnlyTheDateInput(): void
+    {
+        $this->store(Direction::Departure, '2026-11-15T23:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        /** @var TimetableGateRepositoryInterface $gate */
+        $gate = static::getContainer()->get('test.timetable_gate_repository');
+        $gate->addVersion(FictionalTimetable::settings('2026-11-09', '2026-11-16'), new \DateTimeImmutable('2026-11-15T23:05:00Z'));
+
+        $crawler = $this->client->request('GET', '/flights?date=2026-11-16');
+
+        self::assertCount(1, $this->rows($crawler));
+        self::assertSelectorNotExists('.date-nav-links');
+        $input = $crawler->filter('.date-form input[type="date"]');
+        self::assertSame(['2026-11-16', '2026-11-16', '2026-11-16'], [$input->attr('value'), $input->attr('min'), $input->attr('max')]);
+        self::assertSelectorTextSame('.date-nav-range', '出発便を表示できる日付：2026年11月16日〜2026年11月16日');
     }
 
     public function testOutsideDayStillOffersTheGuidedDates(): void

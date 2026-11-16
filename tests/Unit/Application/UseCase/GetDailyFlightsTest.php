@@ -166,20 +166,20 @@ final class GetDailyFlightsTest extends TestCase
     }
 
     /**
-     * @return iterable<string, array{string, ?string, ?string}>
+     * @return iterable<string, array{string, ?string, ?string, string}>
      */
     public static function neighbouringDays(): iterable
     {
-        yield 'yesterday' => ['2026-11-15', null, '2026-11-16'];
-        yield 'first guided day' => ['2026-11-16', null, '2026-11-17'];
-        yield 'inside' => ['2026-11-20', '2026-11-19', '2026-11-21'];
-        yield 'last guided day' => ['2026-11-30', '2026-11-29', null];
-        yield 'day after the period' => ['2026-12-01', '2026-11-30', null];
-        yield 'far outside' => ['2027-03-01', null, null];
+        yield 'yesterday' => ['2026-11-15', null, '2026-11-16', '2026-11-16'];
+        yield 'first guided day' => ['2026-11-16', null, '2026-11-17', '2026-11-16'];
+        yield 'inside' => ['2026-11-20', '2026-11-19', '2026-11-21', '2026-11-20'];
+        yield 'last guided day' => ['2026-11-30', '2026-11-29', null, '2026-11-30'];
+        yield 'day after the period' => ['2026-12-01', '2026-11-30', null, '2026-11-16'];
+        yield 'far outside' => ['2027-03-01', null, null, '2026-11-16'];
     }
 
     #[DataProvider('neighbouringDays')]
-    public function testOffersOnlyNeighbouringDaysThatAreGuided(string $day, ?string $previous, ?string $next): void
+    public function testOffersOnlyNeighbouringDaysThatAreGuided(string $day, ?string $previous, ?string $next, string $inputValue): void
     {
         $this->storeDeparture('2026-11-16T02:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
         $this->publish();
@@ -188,6 +188,15 @@ final class GetDailyFlightsTest extends TestCase
 
         self::assertSame($previous, $board->previousDate()?->toString());
         self::assertSame($next, $board->nextDate()?->toString());
+        self::assertSame($inputValue, $board->dateInputValue()?->toString());
+    }
+
+    public function testNoDateInputValueWithoutGuidedDates(): void
+    {
+        $this->storeDeparture('2026-11-01T00:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $this->publish();
+
+        self::assertNull($this->useCase()->execute($this->monday, Direction::Departure)->dateInputValue());
     }
 
     public function testWithdrawnDirectionIsOutsideWhileTheOtherIsPublished(): void
