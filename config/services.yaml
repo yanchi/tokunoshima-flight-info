@@ -34,10 +34,6 @@ services:
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
 
-    App\Domain\Flight\FreshnessPolicy:
-        arguments:
-            $maxAgeSeconds: '%env(int:FLIGHT_DATA_MAX_AGE_SECONDS)%'
-
     # The ODPT consumer key is part of the request URL. The framework's
     # http_client logs every URL (CurlHttpClient: 'Request: "GET <url>"'),
     # so ODPT gets its own client created without a logger (CLAUDE.md §8).
@@ -74,10 +70,9 @@ services:
     App\Application\Port\TimetableProviderInterface:
         alias: App\Infrastructure\Provider\Odpt\OdptTimetableProvider
 
-    # No data source is approved yet (CLAUDE.md §7), so the board reads from
-    # a repository that never has data.
-    App\Application\Port\FlightBoardRepositoryInterface:
-        alias: App\Infrastructure\Persistence\NoDataFlightBoardRepository
+    App\Application\UseCase\GetDailyFlights:
+        arguments:
+            $timetableSourceName: '公共交通オープンデータセンター'
 
 when@test:
     services:

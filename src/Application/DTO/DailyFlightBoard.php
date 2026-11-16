@@ -10,25 +10,45 @@ use App\Domain\Flight\ServiceDate;
 final readonly class DailyFlightBoard
 {
     /**
-     * @param list<FlightRow> $flights
+     * @param bool                 $fetchOverdue past the warning threshold; only while published
+     * @param list<FlightRow>      $flights      flights without a note; only while published
+     * @param list<NotedFlightRow> $notedFlights flights with a note; only while published
+     * @param ?\DateTimeImmutable  $fetchedAt    null when never fetched or when the fetch time is in the future
+     * @param ?string              $sourceName   null only when never fetched
      */
     public function __construct(
         public ServiceDate $date,
         public Direction $direction,
-        public DataAvailability $availability,
+        public BoardState $state,
+        public bool $fetchOverdue,
         public array $flights,
+        public array $notedFlights,
         public ?\DateTimeImmutable $fetchedAt,
         public ?string $sourceName,
     ) {
+        $published = BoardState::Published === $state;
+        if (!$published && ($fetchOverdue || [] !== $flights || [] !== $notedFlights)) {
+            throw new \InvalidArgumentException('Only a published board has flights or a fetch warning.');
+        }
+        if ((BoardState::NeverFetched === $state) !== (null === $sourceName)) {
+            throw new \InvalidArgumentException('The source name is missing exactly when nothing was fetched.');
+        }
+        $hidesFetchTime = BoardState::NeverFetched === $state || BoardState::FetchTimeUnknown === $state;
+        if ($hidesFetchTime !== (null === $fetchedAt)) {
+            throw new \InvalidArgumentException('The fetch time is shown unless nothing was fetched or it is in the future.');
+        }
     }
 
-    public function isUnavailable(): bool
+    public function isPublished(): bool
     {
-        return DataAvailability::Unavailable === $this->availability;
+        return BoardState::Published === $this->state;
     }
 
-    public function isStale(): bool
+    /**
+     * Published, but the day has no flight at all in the timetable.
+     */
+    public function hasNoFlights(): bool
     {
-        return DataAvailability::Stale === $this->availability;
+        return $this->isPublished() && [] === $this->flights && [] === $this->notedFlights;
     }
 }
