@@ -11,14 +11,15 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
+use Symfony\Component\Filesystem\Filesystem;
 
 /**
  * The error pages as production shows them: the kernel runs without debug,
  * so Symfony renders templates/bundles/TwigBundle/Exception/ instead of its
  * exception page.
  *
- * Without debug the test container is not rebuilt when config changes: after
- * editing config/ or templates/bundles/, clear var/cache/test before running.
+ * That kernel never checks its cache for freshness, so it has its own cache
+ * directory (App\Kernel::getCacheDir()), cleared before this class runs.
  */
 final class ErrorPagesTest extends WebTestCase
 {
@@ -27,6 +28,11 @@ final class ErrorPagesTest extends WebTestCase
     private const OFFICIAL_SENTENCE = '最新の運航状況は、日本航空（JAL）公式サイトでご確認ください。';
 
     private KernelBrowser $client;
+
+    public static function setUpBeforeClass(): void
+    {
+        (new Filesystem())->remove(\dirname(__DIR__, 2).'/var/cache/test_nodebug');
+    }
 
     protected function setUp(): void
     {
@@ -39,10 +45,10 @@ final class ErrorPagesTest extends WebTestCase
      */
     public static function badRequests(): iterable
     {
-        yield 'date with slashes' => ['/flights?date=2026/11/17', 400, '指定が正しくありません', '「年-月-日」の形'];
-        yield 'date that does not exist' => ['/flights?date=2026-02-30', 400, '指定が正しくありません', '「年-月-日」の形'];
-        yield 'unknown direction on /flights' => ['/flights?direction=north', 400, '指定が正しくありません', '出発・到着の指定'];
-        yield 'unknown direction on /' => ['/?direction=north', 400, '指定が正しくありません', '出発・到着の指定'];
+        yield 'date with slashes' => ['/flights?date=2026/11/17', 400, '指定が正しくありません', '日付を指定した場合は、半角の数字で「年-月-日」の形'];
+        yield 'date that does not exist' => ['/flights?date=2026-02-30', 400, '指定が正しくありません', '日付を指定した場合は、半角の数字で「年-月-日」の形'];
+        yield 'unknown direction on /flights' => ['/flights?direction=north', 400, '指定が正しくありません', 'ページの指定が正しくないため、表示できません。'];
+        yield 'unknown direction on /' => ['/?direction=north', 400, '指定が正しくありません', 'ページの指定が正しくないため、表示できません。'];
         yield 'unknown page' => ['/no-such-page', 404, 'ページが見つかりません', 'URL をご確認ください'];
         yield 'method not allowed' => ['/about', 405, 'ページを表示できません', 'このページは表示できません。'];
     }
@@ -88,12 +94,13 @@ final class ErrorPagesTest extends WebTestCase
     }
 
     /**
-     * @return iterable<string, array{string}>
+     * @return iterable<string, array{string, string}>
      */
     public static function clientErrors(): iterable
     {
-        yield '400' => ['/flights?date=2026/11/17'];
-        yield '404' => ['/no-such-page'];
+        yield '400' => ['GET', '/flights?date=2026/11/17'];
+        yield '404' => ['GET', '/no-such-page'];
+        yield '405' => ['POST', '/about'];
     }
 
     /**
@@ -101,13 +108,13 @@ final class ErrorPagesTest extends WebTestCase
      * level (error), so it neither alerts nor flushes the buffer.
      */
     #[DataProvider('clientErrors')]
-    public function testClientErrorsAreLoggedAtInfo(string $path): void
+    public function testClientErrorsAreLoggedAtInfo(string $method, string $path): void
     {
         $logger = static::getContainer()->get('monolog.logger.request');
         $handler = new TestHandler();
         $logger->pushHandler($handler);
 
-        $this->client->request('GET', $path);
+        $this->client->request($method, $path);
 
         $uncaught = array_values(array_filter(
             $handler->getRecords(),

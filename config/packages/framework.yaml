@@ -8,7 +8,9 @@ framework:
     # A bad URL from a visitor is not a fault of the site: log it at info, below
     # the prod fingers_crossed action level, so it neither alerts nor flushes the
     # buffer (docs/data-source-verification.md §8 「エラーの画面」). 5xx keep the
-    # default critical level.
+    # default critical level. When a feature starts to throw another 4xx
+    # (403, 422, 429...), add its exception here, or it is logged at error.
+    # Never map the base HttpException: 503 and other 5xx would become info.
     exceptions:
         Symfony\Component\HttpKernel\Exception\BadRequestHttpException:
             log_level: info

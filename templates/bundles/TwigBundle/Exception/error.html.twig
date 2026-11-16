@@ -3,10 +3,12 @@
 {% extends 'base.html.twig' %}
 
 {% if status_code == 400 %}
+    {# Also shown for 400s with other causes (an untrusted host, say), so
+       the date hint stays conditional. #}
     {% set error_heading = '指定が正しくありません' %}
     {% set error_lines = [
-        '表示する日付、または出発・到着の指定が正しくありません。',
-        '日付は、半角の数字で「年-月-日」の形（例：2026-11-17）で指定してください。',
+        'ページの指定が正しくないため、表示できません。',
+        '日付を指定した場合は、半角の数字で「年-月-日」の形（例：2026-11-17）で指定してください。',
     ] %}
 {% elseif status_code == 404 %}
     {% set error_heading = 'ページが見つかりません' %}
