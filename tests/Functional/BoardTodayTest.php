@@ -8,6 +8,7 @@ use App\Application\DTO\TimetableEntry;
 use App\Application\Gate\WithdrawalCause;
 use App\Application\Port\TimetableGateRepositoryInterface;
 use App\Application\Port\TimetableRepositoryInterface;
+use App\Application\UseCase\PurgeTimetableData;
 use App\Domain\Flight\Direction;
 use App\Domain\Flight\Weekday;
 use App\Tests\Support\FictionalTimetable;
@@ -289,6 +290,26 @@ final class BoardTodayTest extends WebTestCase
         self::assertSelectorTextContains('.message--error', '運航情報を取得できません');
         self::assertSelectorTextContains('.message--error', '現在、本サイトでは便の情報を表示できません。'.self::OFFICIAL_SENTENCE);
         self::assertSame(['確認できません', '確認できません'], $this->meta($crawler));
+    }
+
+    public function testAfterThePurgeTheBoardIsAsIfNeverFetched(): void
+    {
+        $this->storeDepartures('2026-11-15T23:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:05')]);
+        $this->store(Direction::Arrival, '2026-11-15T23:00:00Z', [FictionalTimetable::arrival('ZZ1002', Weekday::Monday, '10:30')]);
+        $this->publish();
+        foreach (['/', '/?direction=arrival'] as $url) {
+            $this->client->request('GET', $url);
+            self::assertSelectorExists('table.flights', $url);
+        }
+
+        static::getContainer()->get(PurgeTimetableData::class)->execute();
+
+        foreach (['/', '/?direction=arrival'] as $url) {
+            $crawler = $this->client->request('GET', $url);
+            self::assertSelectorTextContains('[role="status"]', '運航情報を取得できません', $url);
+            self::assertSelectorNotExists('table.flights', $url);
+            self::assertSame(['未取得', 'なし'], $this->meta($crawler), $url);
+        }
     }
 
     public function testPublishedBoardHasNoEstimatedTimeColumn(): void
