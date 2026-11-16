@@ -539,7 +539,7 @@ final class SyncTimetableTest extends TestCase
     {
         $this->storeBoth('2026-11-12T02:00:00Z');
         $version = $this->setGate();
-        $this->gate->withdraw($version, Direction::Departure, WithdrawalCause::Manual, 'test', $this->clock->now());
+        $this->gate->withdraw($version, Direction::Departure, WithdrawalCause::Manual, $this->clock->now());
         $this->respondBoth('2026-11-12T02:59:58Z');
         $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:59:58Z', validTo: '2027-03-31'));
 
@@ -557,7 +557,7 @@ final class SyncTimetableTest extends TestCase
     {
         $this->storeBoth('2026-11-12T02:00:00Z');
         $version = $this->setGate();
-        $this->gate->withdraw($version, Direction::Arrival, WithdrawalCause::Manual, 'test', $this->clock->now());
+        $this->gate->withdraw($version, Direction::Arrival, WithdrawalCause::Manual, $this->clock->now());
         $this->respondBoth('2026-11-12T02:59:58Z');
 
         $this->sync()->execute();

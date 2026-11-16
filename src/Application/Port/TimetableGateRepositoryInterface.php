@@ -43,11 +43,16 @@ interface TimetableGateRepositoryInterface
 
     /**
      * Withdraws the direction from the given version. A direction already
-     * withdrawn from it keeps its first withdrawal.
-     *
-     * @param ?string $reason the operator's reason for a manual withdrawal
+     * withdrawn from it keeps its first withdrawal (cause and time).
      *
      * @return bool false when the direction was already withdrawn from it
      */
-    public function withdraw(int $versionId, Direction $direction, WithdrawalCause $cause, ?string $reason, \DateTimeImmutable $withdrawnAt): bool;
+    public function withdraw(int $versionId, Direction $direction, WithdrawalCause $cause, \DateTimeImmutable $withdrawnAt): bool;
+
+    /**
+     * Records one manual withdrawal operation with the operator's reason.
+     * Every operation is kept, also one on a direction already withdrawn
+     * (2026-11-16 operator decision), apart from the withdrawn state.
+     */
+    public function recordManualWithdrawal(int $versionId, Direction $direction, string $reason, \DateTimeImmutable $executedAt): void;
 }

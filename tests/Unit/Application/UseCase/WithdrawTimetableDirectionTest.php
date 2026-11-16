@@ -44,27 +44,38 @@ final class WithdrawTimetableDirectionTest extends TestCase
             'version' => $current,
             'direction' => Direction::Departure,
             'cause' => WithdrawalCause::Manual,
-            'reason' => '再照合で ZZ1001 の時刻が不一致',
             'at' => $this->clock->now(),
         ], $this->gate->withdrawals[0]);
+        self::assertEquals([[
+            'version' => $current,
+            'direction' => Direction::Departure,
+            'reason' => '再照合で ZZ1001 の時刻が不一致',
+            'at' => $this->clock->now(),
+        ]], $this->gate->manualWithdrawals);
     }
 
-    public function testAlreadyWithdrawnKeepsTheFirstWithdrawal(): void
+    public function testAlreadyWithdrawnKeepsTheFirstWithdrawalAndRecordsTheOperation(): void
     {
         $version = $this->addVersion();
-        $this->gate->withdraw($version, Direction::Arrival, WithdrawalCause::ComparedItemsChanged, null, $this->clock->now());
+        $this->gate->withdraw($version, Direction::Arrival, WithdrawalCause::ComparedItemsChanged, $this->clock->now());
 
         $outcome = $this->useCase()->execute(Direction::Arrival, 'test');
 
         self::assertSame(WithdrawalOutcome::AlreadyWithdrawn, $outcome);
         self::assertCount(1, $this->gate->withdrawals);
         self::assertSame(WithdrawalCause::ComparedItemsChanged, $this->gate->withdrawals[0]['cause']);
+        // The operator's finding is kept although nothing changed (2026-11-16 operator decision).
+        self::assertSame([['version' => $version, 'direction' => Direction::Arrival, 'reason' => 'test']], array_map(
+            static fn (array $operation): array => ['version' => $operation['version'], 'direction' => $operation['direction'], 'reason' => $operation['reason']],
+            $this->gate->manualWithdrawals,
+        ));
     }
 
     public function testNothingHappensWithoutAVersion(): void
     {
         self::assertSame(WithdrawalOutcome::NoVersion, $this->useCase()->execute(Direction::Departure, 'test'));
         self::assertSame([], $this->gate->withdrawals);
+        self::assertSame([], $this->gate->manualWithdrawals);
     }
 
     public function testBlankReasonIsRefused(): void

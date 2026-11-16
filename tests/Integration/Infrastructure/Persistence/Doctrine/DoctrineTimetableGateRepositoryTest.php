@@ -72,7 +72,7 @@ final class DoctrineTimetableGateRepositoryTest extends KernelTestCase
     public function testLatestVersionIsInForceAndStartsWithoutWithdrawals(): void
     {
         $first = $this->gate->addVersion(self::settings('0'), new \DateTimeImmutable());
-        self::assertTrue($this->gate->withdraw($first->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, null, new \DateTimeImmutable()));
+        self::assertTrue($this->gate->withdraw($first->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, new \DateTimeImmutable()));
         $second = $this->gate->addVersion(self::settings('1'), new \DateTimeImmutable());
         $this->entityManager->clear();
 
@@ -86,17 +86,38 @@ final class DoctrineTimetableGateRepositoryTest extends KernelTestCase
     {
         $version = $this->gate->addVersion(self::settings('0'), new \DateTimeImmutable());
 
-        self::assertTrue($this->gate->withdraw($version->id, Direction::Arrival, WithdrawalCause::Manual, 'テスト用の理由', new \DateTimeImmutable()));
+        self::assertTrue($this->gate->withdraw($version->id, Direction::Arrival, WithdrawalCause::Manual, new \DateTimeImmutable()));
         $this->entityManager->clear();
-        self::assertFalse($this->gate->withdraw($version->id, Direction::Arrival, WithdrawalCause::ComparedItemsChanged, null, new \DateTimeImmutable()));
-        self::assertTrue($this->gate->withdraw($version->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, null, new \DateTimeImmutable()));
+        self::assertFalse($this->gate->withdraw($version->id, Direction::Arrival, WithdrawalCause::ComparedItemsChanged, new \DateTimeImmutable()));
+        self::assertTrue($this->gate->withdraw($version->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, new \DateTimeImmutable()));
 
         self::assertEquals([Direction::Arrival, Direction::Departure], $this->gate->findCurrentState()?->withdrawn);
-        $rows = $this->entityManager->getConnection()->fetchAllAssociative('SELECT direction, cause, reason FROM timetable_gate_withdrawal ORDER BY id');
+        $rows = $this->entityManager->getConnection()->fetchAllAssociative('SELECT direction, cause FROM timetable_gate_withdrawal ORDER BY id');
         self::assertSame([
-            ['direction' => 'arrival', 'cause' => 'manual', 'reason' => 'テスト用の理由'],
-            ['direction' => 'departure', 'cause' => 'compared_items_changed', 'reason' => null],
+            ['direction' => 'arrival', 'cause' => 'manual'],
+            ['direction' => 'departure', 'cause' => 'compared_items_changed'],
         ], $rows);
+    }
+
+    public function testEveryManualOperationIsRecorded(): void
+    {
+        $version = $this->gate->addVersion(self::settings('0'), new \DateTimeImmutable());
+
+        $this->gate->recordManualWithdrawal($version->id, Direction::Departure, 'テスト用の理由1', new \DateTimeImmutable('2026-11-16T03:00:00Z'));
+        $this->gate->recordManualWithdrawal($version->id, Direction::Departure, 'テスト用の理由2', new \DateTimeImmutable('2026-11-16T04:00:00Z'));
+
+        $rows = $this->entityManager->getConnection()->fetchAllAssociative('SELECT version_id, direction, reason, executed_at FROM timetable_gate_manual_withdrawal ORDER BY id');
+        self::assertSame([
+            ['version_id' => $version->id, 'direction' => 'departure', 'reason' => 'テスト用の理由1', 'executed_at' => '2026-11-16 03:00:00'],
+            ['version_id' => $version->id, 'direction' => 'departure', 'reason' => 'テスト用の理由2', 'executed_at' => '2026-11-16 04:00:00'],
+        ], $rows);
+    }
+
+    public function testOperationOnAMissingVersionFails(): void
+    {
+        $this->expectException(\LogicException::class);
+
+        $this->gate->recordManualWithdrawal(42, Direction::Departure, 'test', new \DateTimeImmutable());
     }
 
     public function testFailureInsideTheTransactionStoresNothing(): void
@@ -129,7 +150,7 @@ final class DoctrineTimetableGateRepositoryTest extends KernelTestCase
             $timetables->save(
                 SyncTimetableTest::fetched(Direction::Departure, '2026-11-16T02:30:00Z', flightNumber: 'ZZ1005'),
                 function (?TimetableFetchResult $previous) use ($version): void {
-                    $this->gate->withdraw($version->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, null, new \DateTimeImmutable());
+                    $this->gate->withdraw($version->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, new \DateTimeImmutable());
                     throw new \RuntimeException('test');
                 },
             );

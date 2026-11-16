@@ -10,6 +10,7 @@ use App\Application\Gate\TimetableGateVersion;
 use App\Application\Gate\WithdrawalCause;
 use App\Application\Port\TimetableGateRepositoryInterface;
 use App\Domain\Flight\Direction;
+use App\Infrastructure\Persistence\Doctrine\Entity\TimetableGateManualWithdrawal;
 use App\Infrastructure\Persistence\Doctrine\Entity\TimetableGateVersionRecord;
 use App\Infrastructure\Persistence\Doctrine\Entity\TimetableGateWithdrawal;
 use Doctrine\ORM\EntityManagerInterface;
@@ -74,7 +75,7 @@ final readonly class DoctrineTimetableGateRepository implements TimetableGateRep
         return $record->toVersion();
     }
 
-    public function withdraw(int $versionId, Direction $direction, WithdrawalCause $cause, ?string $reason, \DateTimeImmutable $withdrawnAt): bool
+    public function withdraw(int $versionId, Direction $direction, WithdrawalCause $cause, \DateTimeImmutable $withdrawnAt): bool
     {
         $existing = $this->entityManager->getRepository(TimetableGateWithdrawal::class)->count([
             'version' => $versionId,
@@ -84,14 +85,24 @@ final readonly class DoctrineTimetableGateRepository implements TimetableGateRep
             return false;
         }
 
-        // Looked up rather than referenced: SQLite does not enforce the foreign
-        // key unless foreign_keys is turned on, which this connection does not.
-        $version = $this->entityManager->find(TimetableGateVersionRecord::class, $versionId)
-            ?? throw new \LogicException(\sprintf('Gate version %d does not exist.', $versionId));
-        $this->entityManager->persist(new TimetableGateWithdrawal($version, $direction, $cause, $reason, $withdrawnAt));
+        $this->entityManager->persist(new TimetableGateWithdrawal($this->version($versionId), $direction, $cause, $withdrawnAt));
         $this->entityManager->flush();
 
         return true;
+    }
+
+    public function recordManualWithdrawal(int $versionId, Direction $direction, string $reason, \DateTimeImmutable $executedAt): void
+    {
+        $this->entityManager->persist(new TimetableGateManualWithdrawal($this->version($versionId), $direction, $reason, $executedAt));
+        $this->entityManager->flush();
+    }
+
+    private function version(int $versionId): TimetableGateVersionRecord
+    {
+        // Looked up rather than referenced: SQLite does not enforce the foreign
+        // key unless foreign_keys is turned on, which this connection does not.
+        return $this->entityManager->find(TimetableGateVersionRecord::class, $versionId)
+            ?? throw new \LogicException(\sprintf('Gate version %d does not exist.', $versionId));
     }
 
     private function latestRecord(): ?TimetableGateVersionRecord

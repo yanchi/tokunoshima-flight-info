@@ -12,7 +12,8 @@ use Doctrine\ORM\Mapping as ORM;
 /**
  * A direction withdrawn from one gate settings version (§7 step 7). Tied to
  * the version it was judged against, so a newer version starts with no
- * withdrawals. At most one per version and direction.
+ * withdrawals. At most one per version and direction; the operator's
+ * manual operations are kept apart in TimetableGateManualWithdrawal.
  */
 #[ORM\Entity]
 #[ORM\Table(name: 'timetable_gate_withdrawal')]
@@ -32,9 +33,6 @@ class TimetableGateWithdrawal
         private Direction $direction,
         #[ORM\Column(length: 32, enumType: WithdrawalCause::class)]
         private WithdrawalCause $cause,
-        // The operator's reason for a manual withdrawal; null for (a).
-        #[ORM\Column(type: Types::TEXT, nullable: true)]
-        private ?string $reason,
         #[ORM\Column(type: Types::DATETIME_UTC_IMMUTABLE)]
         private \DateTimeImmutable $withdrawnAt,
     ) {

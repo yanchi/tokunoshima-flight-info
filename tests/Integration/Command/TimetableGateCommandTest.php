@@ -110,6 +110,13 @@ final class TimetableGateCommandTest extends KernelTestCase
 
         self::assertSame(Command::SUCCESS, $status);
         self::assertSame([Direction::Departure], $this->gate->findCurrentState()?->withdrawn);
+
+        // Again on the same direction: nothing changes, the operation is still recorded.
+        self::assertSame(Command::SUCCESS, $this->tester->execute(['action' => 'withdraw', '--direction' => 'departure', '--reason' => 'テスト用の別の理由']));
+        self::assertStringContainsString('already withdrawn', $this->tester->getDisplay());
+        $connection = self::getContainer()->get(EntityManagerInterface::class)->getConnection();
+        self::assertEquals(1, $connection->fetchOne('SELECT COUNT(*) FROM timetable_gate_withdrawal'));
+        self::assertSame(['テスト用の理由', 'テスト用の別の理由'], $connection->fetchFirstColumn('SELECT reason FROM timetable_gate_manual_withdrawal ORDER BY id'));
     }
 
     public function testWithdrawBeforeAnyVersionFails(): void
@@ -134,7 +141,7 @@ final class TimetableGateCommandTest extends KernelTestCase
         $this->tester->execute(self::setInput());
         $state = $this->gate->findCurrentState();
         self::assertNotNull($state);
-        $this->gate->withdraw($state->version->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, null, new \DateTimeImmutable());
+        $this->gate->withdraw($state->version->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, new \DateTimeImmutable());
 
         self::assertSame(Command::FAILURE, $this->tester->execute(self::setInput(['--departure-data-date' => '2026-08-21T13:00:01+09:00'])));
         self::assertSame(Command::FAILURE, $this->tester->execute(self::setInput(['--record-commit' => strtoupper(self::COMMIT)])));

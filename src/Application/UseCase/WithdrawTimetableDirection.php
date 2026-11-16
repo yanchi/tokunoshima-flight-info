@@ -15,8 +15,8 @@ use Psr\Clock\ClockInterface;
  * Withdraws one direction from the version in force by hand, e.g. when a
  * mismatch is found while comparing again (docs/data-source-verification.md
  * §7 step 7 「手動で外す操作」). It stays withdrawn until a new version is set.
- * Not a sync, so nothing is written to the sync log; the reason is stored
- * with the withdrawal.
+ * Not a sync, so nothing is written to the sync log; every operation is
+ * stored with its reason.
  */
 final readonly class WithdrawTimetableDirection
 {
@@ -46,9 +46,13 @@ final readonly class WithdrawTimetableDirection
                 return WithdrawalOutcome::NoVersion;
             }
 
-            return $this->gate->withdraw($state->version->id, $direction, WithdrawalCause::Manual, $reason, $this->clock->now())
-                ? WithdrawalOutcome::Withdrawn
-                : WithdrawalOutcome::AlreadyWithdrawn;
+            $now = $this->clock->now();
+            $withdrawn = $this->gate->withdraw($state->version->id, $direction, WithdrawalCause::Manual, $now);
+            // Recorded either way: the operator's finding is kept even when the
+            // direction was already out (2026-11-16 operator decision).
+            $this->gate->recordManualWithdrawal($state->version->id, $direction, $reason, $now);
+
+            return $withdrawn ? WithdrawalOutcome::Withdrawn : WithdrawalOutcome::AlreadyWithdrawn;
         }));
     }
 }

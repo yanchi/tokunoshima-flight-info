@@ -199,7 +199,7 @@ final readonly class SyncTimetable
             return ['state' => $state, 'result' => 'unchanged'];
         }
 
-        $withdrawn = $this->gate->withdraw($state->version->id, $fetched->direction, WithdrawalCause::ComparedItemsChanged, null, $this->clock->now());
+        $withdrawn = $this->gate->withdraw($state->version->id, $fetched->direction, WithdrawalCause::ComparedItemsChanged, $this->clock->now());
 
         return ['state' => $state, 'result' => $withdrawn ? 'withdrawn' : 'already_withdrawn'];
     }

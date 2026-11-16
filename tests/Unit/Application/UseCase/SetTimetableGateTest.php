@@ -66,7 +66,7 @@ final class SetTimetableGateTest extends TestCase
     public function testSettingTheSameValuesAgainClearsTheWithdrawal(): void
     {
         $first = $this->useCase()->execute(self::request());
-        $this->gate->withdraw($first->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, null, $this->clock->now());
+        $this->gate->withdraw($first->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, $this->clock->now());
 
         $second = $this->useCase()->execute(self::request());
 

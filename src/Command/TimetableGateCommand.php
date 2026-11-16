@@ -111,7 +111,7 @@ final class TimetableGateCommand extends Command
 
         return match ($this->withdrawTimetableDirection->execute($direction, $reason)) {
             WithdrawalOutcome::Withdrawn => $this->done($io, \sprintf('The %s timetable is withdrawn until a new gate version is set.', $direction->value)),
-            WithdrawalOutcome::AlreadyWithdrawn => $this->done($io, \sprintf('The %s timetable was already withdrawn; the earlier withdrawal is kept.', $direction->value)),
+            WithdrawalOutcome::AlreadyWithdrawn => $this->done($io, \sprintf('The %s timetable was already withdrawn; it stays withdrawn and this operation is recorded.', $direction->value)),
             WithdrawalOutcome::NoVersion => $this->refuse($io, 'No gate version is set, so nothing is published.'),
         };
     }

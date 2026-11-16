@@ -20,8 +20,11 @@ final class InMemoryTimetableGateRepository implements TimetableGateRepositoryIn
     /** @var list<TimetableGateVersion> */
     public array $versions = [];
 
-    /** @var list<array{version: int, direction: Direction, cause: WithdrawalCause, reason: ?string, at: \DateTimeImmutable}> */
+    /** @var list<array{version: int, direction: Direction, cause: WithdrawalCause, at: \DateTimeImmutable}> */
     public array $withdrawals = [];
+
+    /** @var list<array{version: int, direction: Direction, reason: string, at: \DateTimeImmutable}> */
+    public array $manualWithdrawals = [];
 
     public int $transactions = 0;
 
@@ -57,15 +60,20 @@ final class InMemoryTimetableGateRepository implements TimetableGateRepositoryIn
         return $version;
     }
 
-    public function withdraw(int $versionId, Direction $direction, WithdrawalCause $cause, ?string $reason, \DateTimeImmutable $withdrawnAt): bool
+    public function withdraw(int $versionId, Direction $direction, WithdrawalCause $cause, \DateTimeImmutable $withdrawnAt): bool
     {
         foreach ($this->withdrawals as $withdrawal) {
             if ($withdrawal['version'] === $versionId && $withdrawal['direction'] === $direction) {
                 return false;
             }
         }
-        $this->withdrawals[] = ['version' => $versionId, 'direction' => $direction, 'cause' => $cause, 'reason' => $reason, 'at' => $withdrawnAt];
+        $this->withdrawals[] = ['version' => $versionId, 'direction' => $direction, 'cause' => $cause, 'at' => $withdrawnAt];
 
         return true;
+    }
+
+    public function recordManualWithdrawal(int $versionId, Direction $direction, string $reason, \DateTimeImmutable $executedAt): void
+    {
+        $this->manualWithdrawals[] = ['version' => $versionId, 'direction' => $direction, 'reason' => $reason, 'at' => $executedAt];
     }
 }
