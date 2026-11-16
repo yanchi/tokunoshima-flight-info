@@ -53,8 +53,8 @@ final class TimetableGateCommand extends Command
             ->addOption('to', null, InputOption::VALUE_REQUIRED, 'set: last compared day, inclusive (JST, Y-m-d)')
             ->addOption('compared-on', null, InputOption::VALUE_REQUIRED, 'set: the day the comparison was made (JST, Y-m-d)')
             ->addOption('record-commit', null, InputOption::VALUE_REQUIRED, 'set: merge commit of the PR with the step 5 record (40 lowercase hex digits)')
-            ->addOption('departure-data-date', null, InputOption::VALUE_REQUIRED, 'set: dc:date of the compared TKN departure timetable, with a time zone offset')
-            ->addOption('arrival-data-date', null, InputOption::VALUE_REQUIRED, 'set: dc:date of the compared TKN arrival timetable, with a time zone offset')
+            ->addOption('departure-data-date', null, InputOption::VALUE_REQUIRED, 'set: dc:date of the compared TKN departure timetable, with seconds and the +09:00 offset')
+            ->addOption('arrival-data-date', null, InputOption::VALUE_REQUIRED, 'set: dc:date of the compared TKN arrival timetable, with seconds and the +09:00 offset')
             ->addOption('direction', null, InputOption::VALUE_REQUIRED, 'withdraw: "departure" or "arrival"')
             ->addOption('reason', null, InputOption::VALUE_REQUIRED, 'withdraw: why the direction is withdrawn');
     }
