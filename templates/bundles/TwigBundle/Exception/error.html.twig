@@ -1,0 +1,41 @@
+{# Every error status uses this one template (docs/data-source-verification.md §8 「エラーの画面」).
+   Never print `exception`: its message and trace must not reach the page. #}
+{% extends 'base.html.twig' %}
+
+{% if status_code == 400 %}
+    {# Also shown for 400s with other causes (an untrusted host, say), so
+       the date hint stays conditional. #}
+    {% set error_heading = '指定が正しくありません' %}
+    {% set error_lines = [
+        'ページの指定が正しくないため、表示できません。',
+        '日付を指定した場合は、半角の数字で「年-月-日」の形（例：2026-11-17）で指定してください。',
+    ] %}
+{% elseif status_code == 404 %}
+    {% set error_heading = 'ページが見つかりません' %}
+    {% set error_lines = [
+        'お探しのページは見つかりませんでした。URL をご確認ください。',
+    ] %}
+{% elseif status_code >= 400 and status_code < 500 %}
+    {% set error_heading = 'ページを表示できません' %}
+    {% set error_lines = [
+        'このページは表示できません。',
+    ] %}
+{% else %}
+    {% set error_heading = 'ページを表示できません' %}
+    {% set error_lines = [
+        'サーバーで問題が起きたため、ページを表示できませんでした。時間をおいて、もう一度お試しください。',
+    ] %}
+{% endif %}
+
+{% block title %}{{ error_heading }} | {{ parent() }}{% endblock %}
+
+{% block body %}
+    <h1>{{ error_heading }}</h1>
+    <section class="error-message">
+        {% for line in error_lines %}
+            <p>{{ line }}</p>
+        {% endfor %}
+        <p>{{ include('_official_status_sentence.html.twig')|trim }}</p>
+        <p class="error-code">エラーコード：{{ status_code }}</p>
+    </section>
+{% endblock %}

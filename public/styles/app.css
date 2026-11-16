@@ -290,3 +290,8 @@ h2 {
     margin: 0.5rem 0 0;
     color: var(--color-muted);
 }
+
+.error-code {
+    color: var(--color-muted);
+    font-size: 0.9rem;
+}
