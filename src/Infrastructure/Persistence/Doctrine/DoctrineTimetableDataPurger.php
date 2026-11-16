@@ -15,7 +15,6 @@ use App\Infrastructure\Persistence\Doctrine\Entity\TimetableGateWithdrawal;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\Platforms\SQLitePlatform;
 use Doctrine\ORM\EntityManagerInterface;
-use Doctrine\Persistence\ManagerRegistry;
 
 final readonly class DoctrineTimetableDataPurger implements TimetableDataPurgerInterface
 {
@@ -33,10 +32,8 @@ final readonly class DoctrineTimetableDataPurger implements TimetableDataPurgerI
         TimetableFetchRecord::class,
     ];
 
-    public function __construct(
-        private EntityManagerInterface $entityManager,
-        private ManagerRegistry $registry,
-    ) {
+    public function __construct(private EntityManagerInterface $entityManager)
+    {
     }
 
     public function purgeAll(): TimetablePurgeResult
@@ -45,28 +42,29 @@ final readonly class DoctrineTimetableDataPurger implements TimetableDataPurgerI
         $tables = array_map(fn (string $entity): string => $this->entityManager->getClassMetadata($entity)->getTableName(), self::ENTITIES);
         $isSqlite = $connection->getDatabasePlatform() instanceof SQLitePlatform;
 
-        try {
-            /** @var array<string, int> $deleted */
-            $deleted = $this->entityManager->wrapInTransaction(static function () use ($connection, $tables): array {
-                $deleted = [];
-                foreach ($tables as $table) {
-                    $deleted[$table] = (int) $connection->executeStatement('DELETE FROM '.$connection->quoteSingleIdentifier($table));
-                }
+        // Inside an outer transaction the deletion would not be committed
+        // here, and VACUUM would fail after reporting the rows deleted.
+        if ($connection->isTransactionActive()) {
+            throw new \LogicException('The purge must not run inside a transaction.');
+        }
 
-                return $deleted;
-            });
-        } catch (\Throwable $e) {
-            if (!$this->entityManager->isOpen()) {
-                $this->registry->resetManager();
+        // DBAL, not EntityManager::wrapInTransaction(): that flushes pending
+        // entity changes into the same commit, which could write rows back.
+        /** @var array<string, int> $deleted */
+        $deleted = $connection->transactional(static function (Connection $connection) use ($tables): array {
+            $deleted = [];
+            foreach ($tables as $table) {
+                $deleted[$table] = (int) $connection->executeStatement('DELETE FROM '.$connection->quoteSingleIdentifier($table));
             }
 
-            throw $e;
-        }
+            return $deleted;
+        });
 
         // From here on the rows are deleted: whatever fails is reported as
         // such, never as "nothing was deleted".
         try {
-            // Managed entities would still hold the deleted rows.
+            // Managed entities would still hold the deleted rows; pending
+            // changes are discarded, never flushed.
             $this->entityManager->clear();
             if (!$isSqlite) {
                 return new TimetablePurgeResult($deleted, false);

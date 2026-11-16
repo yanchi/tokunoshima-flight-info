@@ -42,6 +42,10 @@ final class PurgeTimetableDataCommandTest extends KernelTestCase
         $container = self::getContainer();
         self::resetDatabaseSchema($container);
         $this->connection = $container->get(EntityManagerInterface::class)->getConnection();
+        // Some SQLite builds turn secure_delete on by default (the CI runner's
+        // does). With it on, DELETE zeroes the bytes itself and the file checks
+        // would pass without VACUUM, so turn it off for this connection.
+        $this->connection->executeStatement('PRAGMA secure_delete = 0');
 
         $timetables = $container->get('test.timetable_repository');
         foreach (Direction::cases() as $direction) {
@@ -73,6 +77,7 @@ final class PurgeTimetableDataCommandTest extends KernelTestCase
     public function testPurgeDeletesEveryRowAndRewritesTheFile(): void
     {
         self::assertSame('delete', $this->connection->fetchOne('PRAGMA journal_mode'));
+        $this->assertSecureDeleteIsOff();
         self::assertTrue($this->fileContains(self::FLIGHT_NUMBER), 'Precondition: the flight number is in the file.');
 
         self::assertSame(Command::SUCCESS, $this->tester->execute(['--confirm' => true]));
@@ -95,10 +100,43 @@ final class PurgeTimetableDataCommandTest extends KernelTestCase
     public function testInWalModeTheMainFileIsCheckpointed(): void
     {
         self::assertSame('wal', $this->connection->fetchOne('PRAGMA journal_mode = WAL'));
+        $this->assertSecureDeleteIsOff();
         self::assertTrue($this->fileContains(self::FLIGHT_NUMBER), 'Precondition: the flight number is in the file.');
 
         self::assertSame(Command::SUCCESS, $this->tester->execute(['--confirm' => true]));
 
+        self::assertFalse($this->fileContains(self::FLIGHT_NUMBER), 'The flight number is still in the database file.');
+        self::assertFalse($this->fileContains(self::REASON), 'The withdrawal reason is still in the database file.');
+        $wal = $this->databasePath().'-wal';
+        self::assertTrue(!file_exists($wal) || 0 === filesize($wal), 'The -wal file is not truncated.');
+    }
+
+    public function testInWalModeABusyCheckpointReportsTheRowsDeleted(): void
+    {
+        self::assertSame('wal', $this->connection->fetchOne('PRAGMA journal_mode = WAL'));
+        // Fail at once instead of waiting for the reader (PDO's default is 60 s).
+        $this->connection->executeStatement('PRAGMA busy_timeout = 0');
+        $reader = new \PDO('sqlite:'.$this->databasePath());
+        $reader->exec('BEGIN');
+        $snapshot = $reader->query('SELECT COUNT(*) FROM timetable_flight');
+        self::assertNotFalse($snapshot);
+        $snapshot->fetchAll();
+        try {
+            $status = $this->tester->execute(['--confirm' => true]);
+        } finally {
+            $reader->exec('COMMIT');
+        }
+
+        self::assertSame(Command::FAILURE, $status);
+        $display = $this->tester->getDisplay();
+        self::assertStringContainsString('Run again', $display);
+        // The busy checkpoint, not a busy VACUUM (that would be a DBAL exception).
+        self::assertStringContainsString('(RuntimeException)', $display);
+        self::assertMatchesRegularExpression('/timetable_flight\s+2 rows deleted/', $display);
+        self::assertEquals([0, 0, 0, 0, 0], $this->countRows());
+
+        // Once the reader is gone, running again completes the rewrite.
+        self::assertSame(Command::SUCCESS, $this->tester->execute(['--confirm' => true]));
         self::assertFalse($this->fileContains(self::FLIGHT_NUMBER), 'The flight number is still in the database file.');
         self::assertFalse($this->fileContains(self::REASON), 'The withdrawal reason is still in the database file.');
         $wal = $this->databasePath().'-wal';
@@ -167,12 +205,26 @@ final class PurgeTimetableDataCommandTest extends KernelTestCase
 
         self::assertSame(Command::FAILURE, $this->tester->execute(['--confirm' => true]));
 
-        self::assertStringContainsString('nothing was deleted', $this->tester->getDisplay());
+        self::assertStringContainsString('Nothing was deleted.', $this->tester->getDisplay());
         foreach (['timetable_flight' => 2, 'timetable_gate_version' => 1, 'timetable_gate_withdrawal' => 1, 'timetable_gate_manual_withdrawal' => 1] as $table => $rows) {
             self::assertEquals($rows, $this->connection->fetchOne('SELECT COUNT(*) FROM '.$table), $table);
         }
         // The entity manager is usable again after the failed transaction.
         self::assertNotNull(self::getContainer()->get('test.timetable_gate_repository')->findCurrentState());
+    }
+
+    public function testInsideAnOuterTransactionNothingIsDeleted(): void
+    {
+        $this->connection->beginTransaction();
+        try {
+            $status = $this->tester->execute(['--confirm' => true]);
+        } finally {
+            $this->connection->rollBack();
+        }
+
+        self::assertSame(Command::FAILURE, $status);
+        self::assertStringContainsString('Nothing was deleted.', $this->tester->getDisplay());
+        self::assertEquals([2, 2, 1, 1, 1], $this->countRows());
     }
 
     public function testEveryMappedEntityIsPurged(): void
@@ -197,6 +249,15 @@ final class PurgeTimetableDataCommandTest extends KernelTestCase
     private function countRows(): array
     {
         return array_map(fn (string $table): mixed => $this->connection->fetchOne('SELECT COUNT(*) FROM '.$table), $this->tables());
+    }
+
+    /**
+     * With secure_delete on, DELETE zeroes the bytes itself, and the file
+     * checks would pass without VACUUM (turned off in setUp()).
+     */
+    private function assertSecureDeleteIsOff(): void
+    {
+        self::assertEquals(0, $this->connection->fetchOne('PRAGMA secure_delete'), 'Precondition: secure_delete is off.');
     }
 
     private function fileContains(string $needle): bool

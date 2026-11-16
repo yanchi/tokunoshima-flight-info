@@ -8,7 +8,7 @@ use App\Application\Purge\TimetablePurgeResult;
 
 /**
  * Deletes everything stored from the ODPT timetable when the licence ends
- * (docs/data-source-verification.md §2 「実装への影響」, 基本ライセンス 第13条第3項):
+ * (docs/data-source-verification.md §2 「許諾終了時の削除」, 基本ライセンス 第13条第3項):
  * the timetable, the fetch records and the gate settings versions with
  * their withdrawals (2026-11-16 operator decision, Issue #21).
  *

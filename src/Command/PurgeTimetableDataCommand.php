@@ -55,7 +55,9 @@ final class PurgeTimetableDataCommand extends Command
 
             return Command::FAILURE;
         } catch (\Throwable $e) {
-            $io->error(\sprintf('The purge failed (%s). The transaction was rolled back; nothing was deleted.', $e::class));
+            // Either the deletion was rolled back or it never started (e.g. inside
+            // an outer transaction): nothing was deleted in both cases.
+            $io->error(\sprintf('The purge failed (%s). Nothing was deleted.', $e::class));
 
             return Command::FAILURE;
         }
