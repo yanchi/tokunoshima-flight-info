@@ -31,7 +31,8 @@ final class ErrorPagesTest extends WebTestCase
 
     public static function setUpBeforeClass(): void
     {
-        (new Filesystem())->remove(\dirname(__DIR__, 2).'/var/cache/test_nodebug');
+        // Taken from the kernel (not booted) so the path cannot drift from it.
+        (new Filesystem())->remove(static::createKernel(['debug' => false])->getCacheDir());
     }
 
     protected function setUp(): void
@@ -48,6 +49,8 @@ final class ErrorPagesTest extends WebTestCase
         yield 'date with slashes' => ['/flights?date=2026/11/17', 400, '指定が正しくありません', '日付を指定した場合は、半角の数字で「年-月-日」の形'];
         yield 'date that does not exist' => ['/flights?date=2026-02-30', 400, '指定が正しくありません', '日付を指定した場合は、半角の数字で「年-月-日」の形'];
         yield 'unknown direction on /flights' => ['/flights?direction=north', 400, '指定が正しくありません', 'ページの指定が正しくないため、表示できません。'];
+        // The text does not depend on the cause: the date hint shows here too.
+        yield 'unknown direction, date hint' => ['/flights?direction=north', 400, '指定が正しくありません', '日付を指定した場合は、半角の数字で「年-月-日」の形'];
         yield 'unknown direction on /' => ['/?direction=north', 400, '指定が正しくありません', 'ページの指定が正しくないため、表示できません。'];
         yield 'unknown page' => ['/no-such-page', 404, 'ページが見つかりません', 'URL をご確認ください'];
         yield 'method not allowed' => ['/about', 405, 'ページを表示できません', 'このページは表示できません。'];
