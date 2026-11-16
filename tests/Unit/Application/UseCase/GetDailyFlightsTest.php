@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Application\UseCase;
 use App\Application\DTO\BoardState;
 use App\Application\DTO\DailyFlightBoard;
 use App\Application\DTO\FlightRow;
+use App\Application\DTO\GuidedDateRange;
 use App\Application\DTO\NotedFlightRow;
 use App\Application\DTO\TimetableEntry;
 use App\Application\Gate\WithdrawalCause;
@@ -90,6 +91,103 @@ final class GetDailyFlightsTest extends TestCase
 
         self::assertSame($expected, $board->state);
         self::assertCount(BoardState::Published === $expected ? 1 : 0, $board->flights);
+    }
+
+    public function testPastDayInThePeriodIsOutsideThePublishedPeriod(): void
+    {
+        $this->storeDeparture('2026-11-16T02:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Sunday, '09:00')]);
+        $this->publish();
+
+        $board = $this->useCase()->execute(ServiceDate::fromString('2026-11-15'), Direction::Departure);
+
+        self::assertSame(BoardState::OutsidePublishedPeriod, $board->state);
+        self::assertSame([], $board->flights);
+        self::assertSame(['2026-11-16', '2026-11-30'], self::range($board->guidedDates));
+    }
+
+    /**
+     * Today is 2026-11-16 (JST).
+     *
+     * @return iterable<string, array{string, string, ?array{string, string}}>
+     */
+    public static function periodsAroundToday(): iterable
+    {
+        yield 'started before today' => ['2026-11-09', '2026-11-30', ['2026-11-16', '2026-11-30']];
+        yield 'starts later' => ['2026-11-20', '2026-11-30', ['2026-11-20', '2026-11-30']];
+        yield 'ends today' => ['2026-11-09', '2026-11-16', ['2026-11-16', '2026-11-16']];
+        yield 'ended yesterday' => ['2026-11-09', '2026-11-15', null];
+    }
+
+    /**
+     * @param ?array{string, string} $expected
+     */
+    #[DataProvider('periodsAroundToday')]
+    public function testGuidesFromTodayToTheEndOfThePeriod(string $from, string $to, ?array $expected): void
+    {
+        $this->storeDeparture('2026-11-16T02:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $this->gate->addVersion(FictionalTimetable::settings($from, $to), new \DateTimeImmutable('2026-11-09T00:00:00Z'));
+
+        $board = $this->useCase()->execute(ServiceDate::fromString('2026-11-25'), Direction::Departure);
+
+        self::assertSame($expected, self::range($board->guidedDates));
+    }
+
+    public function testGuidedDatesStartOnTheJstToday(): void
+    {
+        // 2026-11-15 15:00 UTC is already 11-16 in JST.
+        $this->clock->modify('2026-11-15T15:00:00Z');
+        $this->storeDeparture('2026-11-15T14:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Sunday, '09:00')]);
+        $this->publish();
+
+        $board = $this->useCase()->execute(ServiceDate::fromString('2026-11-15'), Direction::Departure);
+
+        self::assertSame(BoardState::OutsidePublishedPeriod, $board->state);
+        self::assertSame(['2026-11-16', '2026-11-30'], self::range($board->guidedDates));
+    }
+
+    public function testNoDatesAreGuidedWithoutAPublishedPeriod(): void
+    {
+        $this->storeDeparture('2026-11-16T02:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $version = $this->publish();
+        $this->gate->withdraw($version, Direction::Departure, WithdrawalCause::Manual, new \DateTimeImmutable('2026-11-16T02:30:00Z'));
+
+        self::assertNull($this->useCase()->execute($this->monday, Direction::Departure)->guidedDates);
+    }
+
+    public function testNoDatesAreGuidedWhileSuspended(): void
+    {
+        $this->storeDeparture('2026-11-01T00:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $this->publish();
+
+        $board = $this->useCase()->execute($this->monday, Direction::Departure);
+
+        self::assertSame(BoardState::Suspended, $board->state);
+        self::assertNull($board->guidedDates);
+    }
+
+    /**
+     * @return iterable<string, array{string, ?string, ?string}>
+     */
+    public static function neighbouringDays(): iterable
+    {
+        yield 'yesterday' => ['2026-11-15', null, '2026-11-16'];
+        yield 'first guided day' => ['2026-11-16', null, '2026-11-17'];
+        yield 'inside' => ['2026-11-20', '2026-11-19', '2026-11-21'];
+        yield 'last guided day' => ['2026-11-30', '2026-11-29', null];
+        yield 'day after the period' => ['2026-12-01', '2026-11-30', null];
+        yield 'far outside' => ['2027-03-01', null, null];
+    }
+
+    #[DataProvider('neighbouringDays')]
+    public function testOffersOnlyNeighbouringDaysThatAreGuided(string $day, ?string $previous, ?string $next): void
+    {
+        $this->storeDeparture('2026-11-16T02:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $this->publish();
+
+        $board = $this->useCase()->execute(ServiceDate::fromString($day), Direction::Departure);
+
+        self::assertSame($previous, $board->previousDate()?->toString());
+        self::assertSame($next, $board->nextDate()?->toString());
     }
 
     public function testWithdrawnDirectionIsOutsideWhileTheOtherIsPublished(): void
@@ -342,21 +440,45 @@ final class GetDailyFlightsTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        new DailyFlightBoard($this->monday, Direction::Departure, BoardState::Suspended, true, [], [], new \DateTimeImmutable(), self::SOURCE);
+        new DailyFlightBoard($this->monday, Direction::Departure, BoardState::Suspended, true, [], [], new \DateTimeImmutable(), self::SOURCE, null);
     }
 
     public function testBoardRejectsAFetchTimeWhenItMustBeHidden(): void
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        new DailyFlightBoard($this->monday, Direction::Departure, BoardState::FetchTimeUnknown, false, [], [], new \DateTimeImmutable(), self::SOURCE);
+        new DailyFlightBoard($this->monday, Direction::Departure, BoardState::FetchTimeUnknown, false, [], [], new \DateTimeImmutable(), self::SOURCE, null);
     }
 
     public function testBoardRejectsASourceWhenNothingWasFetched(): void
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        new DailyFlightBoard($this->monday, Direction::Departure, BoardState::NeverFetched, false, [], [], null, self::SOURCE);
+        new DailyFlightBoard($this->monday, Direction::Departure, BoardState::NeverFetched, false, [], [], null, self::SOURCE, null);
+    }
+
+    public function testBoardRejectsAPublishedDayOutsideTheGuidedDates(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $guided = new GuidedDateRange(ServiceDate::fromString('2026-11-17'), ServiceDate::fromString('2026-11-30'));
+        new DailyFlightBoard($this->monday, Direction::Departure, BoardState::Published, false, [], [], new \DateTimeImmutable(), self::SOURCE, $guided);
+    }
+
+    public function testBoardRejectsAnOutsideDayInsideTheGuidedDates(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $guided = new GuidedDateRange($this->monday, ServiceDate::fromString('2026-11-30'));
+        new DailyFlightBoard($this->monday, Direction::Departure, BoardState::OutsidePublishedPeriod, false, [], [], new \DateTimeImmutable(), self::SOURCE, $guided);
+    }
+
+    public function testBoardRejectsGuidedDatesWhileNotShown(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        $guided = new GuidedDateRange($this->monday, ServiceDate::fromString('2026-11-30'));
+        new DailyFlightBoard($this->monday, Direction::Departure, BoardState::Suspended, false, [], [], new \DateTimeImmutable(), self::SOURCE, $guided);
     }
 
     private function useCase(?TimetableFreshnessPolicy $policy = null, ?RecordingLogger $logger = null): GetDailyFlights
@@ -382,6 +504,14 @@ final class GetDailyFlightsTest extends TestCase
     private function publish(): int
     {
         return $this->gate->addVersion(FictionalTimetable::settings('2026-11-09', '2026-11-30'), new \DateTimeImmutable('2026-11-09T00:00:00Z'))->id;
+    }
+
+    /**
+     * @return ?array{string, string}
+     */
+    private static function range(?GuidedDateRange $range): ?array
+    {
+        return null === $range ? null : [$range->from->toString(), $range->to->toString()];
     }
 
     /**

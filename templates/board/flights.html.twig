@@ -1,0 +1,19 @@
+{% extends 'base.html.twig' %}
+
+{% set is_departure = board.direction.value == 'departure' %}
+{% set day = board.date.toDateTime|date('n月j日') %}
+
+{% block title %}{{ day }}の{{ is_departure ? '出発便' : '到着便' }} | {{ parent() }}{% endblock %}
+
+{% block body %}
+    <h1>日付別の発着便</h1>
+    {{ include('board/_date.html.twig') }}
+
+    <nav class="tabs" aria-label="出発・到着の切り替え">
+        <a href="{{ path('board_flights', {date: board.date.toString}) }}"{% if is_departure %} aria-current="page"{% endif %}>出発</a>
+        <a href="{{ path('board_flights', {date: board.date.toString, direction: 'arrival'}) }}"{% if not is_departure %} aria-current="page"{% endif %}>到着</a>
+    </nav>
+
+    {{ include('board/_board.html.twig') }}
+    {{ include('board/_date_nav.html.twig') }}
+{% endblock %}

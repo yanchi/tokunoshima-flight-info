@@ -1,0 +1,4 @@
+{% set weekdays = ['日', '月', '火', '水', '木', '金', '土'] %}
+<p class="board-date">
+    {{ board.date.toDateTime|date('Y年n月j日') }}（{{ weekdays[board.date.toDateTime|date('w')] }}）
+</p>

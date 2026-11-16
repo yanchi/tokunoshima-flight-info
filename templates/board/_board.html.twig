@@ -1,0 +1,123 @@
+{# The board of one day and direction, shared by / and /flights.
+   Expects `board` (DailyFlightBoard). #}
+{% set is_departure = board.direction.value == 'departure' %}
+{% set official_sentence = include('_official_status_sentence.html.twig')|trim %}
+{% set time_heading = is_departure ? '出発予定' : '到着予定' %}
+{% set states = enum('App\\Application\\DTO\\BoardState') %}
+
+<section class="board" aria-labelledby="board-heading">
+    <h2 id="board-heading">{{ is_departure ? '徳之島発（出発便）' : '徳之島着（到着便）' }}</h2>
+
+    <dl class="board-meta">
+        <dt>最終取得</dt>
+        <dd>
+            {%- if board.fetchedAt -%}
+                <time datetime="{{ board.fetchedAt|date('c') }}">{{ board.fetchedAt|date('Y年n月j日 H:i') }}</time>（日本時間）
+            {%- elseif board.state is same as(states.FetchTimeUnknown) -%}
+                取得日時を確認できません
+            {%- elseif board.state is same as(states.ReadFailed) -%}
+                確認できません
+            {%- else -%}
+                未取得
+            {%- endif -%}
+        </dd>
+        <dt>取得元</dt>
+        <dd>{{ board.sourceName ?? (board.state is same as(states.ReadFailed) ? '確認できません' : 'なし') }}</dd>
+    </dl>
+
+    {% if board.state is same as(states.NeverFetched) or board.state is same as(states.ReadFailed) %}
+        <div class="message message--error" role="status">
+            <p class="message-title">運航情報を取得できません</p>
+            <p>現在、本サイトでは便の情報を表示できません。{{ official_sentence }}</p>
+        </div>
+    {% elseif board.state is same as(states.Suspended) %}
+        <div class="message message--error" role="status">
+            <p class="message-title">運航情報を取得できません</p>
+            <p>時刻表を一定期間取得できていないため、表示を停止しています。{{ official_sentence }}</p>
+        </div>
+    {% elseif board.state is same as(states.ThresholdsInvalid) or board.state is same as(states.FetchTimeUnknown) %}
+        {# The fetch may be recent here, so the text does not blame it. #}
+        <div class="message message--error" role="status">
+            <p class="message-title">運航情報を取得できません</p>
+            <p>時刻表の表示を停止しています。{{ official_sentence }}</p>
+        </div>
+    {% elseif board.state is same as(states.OutsidePublishedPeriod) %}
+        <p class="board-empty">本サイトには表示できる便の情報がありません。{{ official_sentence }}</p>
+    {% elseif board.published %}
+        {% if board.fetchOverdue %}
+            <div class="message message--warning" role="status">
+                <p class="message-title">最終取得から時間が経過しています</p>
+                <p>時刻表をしばらく取得できていません。{{ official_sentence }}</p>
+            </div>
+        {% endif %}
+
+        {% if board.hasNoFlights %}
+            <p class="board-empty">本サイトで取得した時刻表には、この日の便がありません。{{ official_sentence }}</p>
+        {% elseif board.flights is empty %}
+            <p class="board-empty">この日の便は、すべて下の「備考のある便」に表示しています。</p>
+        {% else %}
+            <div class="table-wrap">
+                <table class="flights">
+                    <thead>
+                        <tr>
+                            <th scope="col">便名</th>
+                            <th scope="col">区間</th>
+                            <th scope="col">{{ time_heading }}</th>
+                            {# No 変更後（見込み） column until operation data is shown (Phase 2):
+                               an empty cell would read as "no change" (CLAUDE.md §6). #}
+                            <th scope="col">運航状況</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for flight in board.flights %}
+                            <tr>
+                                <th scope="row">{{ flight.flightNumber }}</th>
+                                <td>{{ flight.origin }} → {{ flight.destination }}</td>
+                                <td><time datetime="{{ flight.scheduledAt|date('c') }}">{{ flight.scheduledAt|date('H:i') }}</time></td>
+                                <td><span class="status {{ flight_status_modifier(flight.status) }}">{{ flight_status_label(flight.status) }}</span></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% endif %}
+
+        {% if board.notedFlights is not empty %}
+            {# CLAUDE.md §6: never mixed into the main list; the note is shown as is. #}
+            <section class="noted-flights" aria-labelledby="noted-heading">
+                <h3 id="noted-heading">備考のある便</h3>
+                <p>運航日が限られる、または期間によって時刻が変わる便です。運航日と時刻は、備考と公式情報でご確認ください。</p>
+                <div class="table-wrap">
+                    <table class="flights">
+                        <thead>
+                            <tr>
+                                <th scope="col">便名</th>
+                                <th scope="col">区間</th>
+                                <th scope="col">{{ time_heading }}</th>
+                                <th scope="col">備考</th>
+                                <th scope="col">運航状況</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for flight in board.notedFlights %}
+                                <tr>
+                                    <th scope="row">{{ flight.flightNumber }}</th>
+                                    <td>{{ flight.origin }} → {{ flight.destination }}</td>
+                                    <td>備考参照</td>
+                                    <td class="flight-note">{{ flight.note }}</td>
+                                    <td><span class="status {{ flight_status_modifier(flight.status) }}">{{ flight_status_label(flight.status) }}</span></td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        {% endif %}
+    {% else %}
+        {# A state this template does not know yet: show nothing rather than a wrong list. #}
+        <div class="message message--error" role="status">
+            <p class="message-title">運航情報を取得できません</p>
+            <p>現在、本サイトでは便の情報を表示できません。{{ official_sentence }}</p>
+        </div>
+    {% endif %}
+</section>

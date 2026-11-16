@@ -83,7 +83,7 @@ final class BoardTodayTest extends WebTestCase
     {
         $this->client->request('GET', '/?direction=sideways');
 
-        self::assertResponseStatusCodeSame(404);
+        self::assertResponseStatusCodeSame(400);
     }
 
     public function testShowsTodayInJst(): void
