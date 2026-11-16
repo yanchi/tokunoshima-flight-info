@@ -19,6 +19,7 @@ use App\Domain\Flight\Weekday;
 use App\Tests\Support\FictionalTimetable;
 use App\Tests\Support\InMemoryTimetableGateRepository;
 use App\Tests\Support\InMemoryTimetableRepository;
+use App\Tests\Support\RecordingLogger;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
@@ -75,7 +76,7 @@ final class GetDailyFlightsTest extends TestCase
         yield 'day before the period' => ['2026-11-08', BoardState::OutsidePublishedPeriod];
         yield 'first day' => ['2026-11-09', BoardState::Published];
         yield 'last day' => ['2026-11-23', BoardState::Published];
-        yield 'day after the period' => ['2026-11-30', BoardState::OutsidePublishedPeriod];
+        yield 'day after the period' => ['2026-11-24', BoardState::OutsidePublishedPeriod];
     }
 
     #[DataProvider('daysAroundThePeriod')]
@@ -104,9 +105,14 @@ final class GetDailyFlightsTest extends TestCase
 
     public function testReadsTheTimetableAndTheGateInOneTransaction(): void
     {
+        $this->timetable->watchTransactionsOf($this->gate);
+        $this->storeDeparture('2026-11-16T02:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+
         $this->useCase()->execute($this->monday, Direction::Departure);
 
         self::assertSame(1, $this->gate->transactions);
+        self::assertSame([true], $this->timetable->readsInTransaction);
+        self::assertSame([true], $this->gate->stateReadsInTransaction);
     }
 
     public function testDepartureBoardListsTheDaysFlightsByDepartureTime(): void
@@ -126,7 +132,6 @@ final class GetDailyFlightsTest extends TestCase
         $first = $board->flights[0];
         self::assertEquals(new \DateTimeImmutable('2026-11-16T09:00:00+09:00'), $first->scheduledAt);
         self::assertSame('Asia/Tokyo', $first->scheduledAt->getTimezone()->getName());
-        self::assertNull($first->estimatedAt);
         self::assertSame(FlightStatus::Scheduled, $first->status);
         self::assertSame(['TKN', 'ZZZ'], [$first->origin->value, $first->destination->value]);
     }
@@ -278,15 +283,32 @@ final class GetDailyFlightsTest extends TestCase
         self::assertSame([], $board->flights);
     }
 
-    public function testInvalidThresholdsAreShownAsSuspended(): void
+    public function testInvalidThresholdsStopTheTimetableButKeepTheFetchTime(): void
     {
         $this->storeDeparture('2026-11-16T02:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
         $this->publish();
 
         $board = $this->useCase(new TimetableFreshnessPolicy('604800', '259200'))->execute($this->monday, Direction::Departure);
 
-        self::assertSame(BoardState::Suspended, $board->state);
+        self::assertSame(BoardState::ThresholdsInvalid, $board->state);
         self::assertSame([], $board->flights);
+        self::assertEquals(new \DateTimeImmutable('2026-11-16T02:00:00Z'), $board->fetchedAt);
+    }
+
+    public function testReadFailureShowsAnUnavailableBoardAndIsLogged(): void
+    {
+        $this->publish();
+        $this->timetable->failNextRead(new \RuntimeException('no such table'));
+        $logger = new RecordingLogger();
+
+        $board = $this->useCase(logger: $logger)->execute($this->monday, Direction::Departure);
+
+        self::assertSame(BoardState::ReadFailed, $board->state);
+        self::assertNull($board->fetchedAt);
+        self::assertNull($board->sourceName);
+        self::assertSame([], $board->flights);
+        self::assertCount(1, $logger->records);
+        self::assertSame('error', $logger->records[0]['level']);
     }
 
     public function testTodayIsTheJstDate(): void
@@ -326,7 +348,7 @@ final class GetDailyFlightsTest extends TestCase
         new DailyFlightBoard($this->monday, Direction::Departure, BoardState::NeverFetched, false, [], [], null, self::SOURCE);
     }
 
-    private function useCase(?TimetableFreshnessPolicy $policy = null): GetDailyFlights
+    private function useCase(?TimetableFreshnessPolicy $policy = null, ?RecordingLogger $logger = null): GetDailyFlights
     {
         return new GetDailyFlights(
             $this->timetable,
@@ -334,6 +356,7 @@ final class GetDailyFlightsTest extends TestCase
             $policy ?? new TimetableFreshnessPolicy('259200', '604800'),
             $this->clock,
             self::SOURCE,
+            $logger ?? new RecordingLogger(),
         );
     }
 

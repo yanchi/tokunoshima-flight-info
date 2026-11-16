@@ -14,10 +14,19 @@ enum BoardState
     case NeverFetched;
 
     /**
-     * Past the stop-publishing threshold, or the thresholds are invalid
-     * (§7 step 7: both are shown the same way).
+     * The stored data could not be read (e.g. the database or its tables
+     * are missing). Nothing is known, not even the fetch time.
      */
+    case ReadFailed;
+
+    /** Past the stop-publishing threshold. */
     case Suspended;
+
+    /**
+     * The freshness thresholds are invalid: not shown, like a suspended
+     * direction (§7 step 7), but without blaming the fetch.
+     */
+    case ThresholdsInvalid;
 
     /** The fetch time is later than now: not shown, fetch time hidden. */
     case FetchTimeUnknown;

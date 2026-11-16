@@ -141,7 +141,7 @@ final class InfoPagesTest extends WebTestCase
         $crawler = $this->client->request('GET', '/sources');
 
         self::assertSame(
-            [['時刻表', '公共交通オープンデータセンター', '公式の時刻表と照合した期間だけ表示'], ['運航状況', 'なし', '準備中']],
+            [['時刻表', '公共交通オープンデータセンター', '運営者が航空会社の公開している時刻表と照合できた期間だけ表示'], ['運航状況', 'なし', '準備中']],
             $crawler->filter('.info-table tbody tr')->each(
                 static fn (Crawler $row): array => $row->filter('th, td')->each(static fn (Crawler $c): string => $c->text()),
             ),

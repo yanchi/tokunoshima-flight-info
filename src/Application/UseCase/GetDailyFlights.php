@@ -20,6 +20,7 @@ use App\Domain\Flight\TimetableFreshness;
 use App\Domain\Flight\TimetableFreshnessPolicy;
 use App\Domain\Flight\Weekday;
 use Psr\Clock\ClockInterface;
+use Psr\Log\LoggerInterface;
 
 /**
  * Builds the departure or arrival board for one service date from the
@@ -38,6 +39,7 @@ final readonly class GetDailyFlights
         private TimetableFreshnessPolicy $freshnessPolicy,
         private ClockInterface $clock,
         private string $timetableSourceName,
+        private LoggerInterface $logger,
     ) {
     }
 
@@ -62,11 +64,22 @@ final readonly class GetDailyFlights
         // One transaction, so the timetable and the gate come from the same
         // state: a sync that replaces the timetable and withdraws its period
         // commits both at once, and the board must not see only one of them.
-        /** @var array{?TimetableFetchResult, ?TimetableGateState} $read */
-        $read = $this->gateRepository->transactional(fn (): array => [
-            $this->timetableRepository->findLatest($direction),
-            $this->gateRepository->findCurrentState(),
-        ]);
+        try {
+            /** @var array{?TimetableFetchResult, ?TimetableGateState} $read */
+            $read = $this->gateRepository->transactional(fn (): array => [
+                $this->timetableRepository->findLatest($direction),
+                $this->gateRepository->findCurrentState(),
+            ]);
+        } catch (\Throwable $e) {
+            // Any failure shows a safe "unavailable" board instead of an error
+            // page; nothing read before the failure is used (CLAUDE.md §8).
+            $this->logger->error('The board could not read the stored timetable.', [
+                'direction' => $direction->value,
+                'exception' => $e,
+            ]);
+
+            return new DailyFlightBoard($date, $direction, BoardState::ReadFailed, false, [], [], null, null);
+        }
         [$timetable, $gate] = $read;
 
         if (null === $timetable) {
@@ -78,7 +91,10 @@ final readonly class GetDailyFlights
         if (TimetableFreshness::FutureDated === $freshness) {
             return $this->board($date, $direction, BoardState::FetchTimeUnknown, null);
         }
-        if (!$freshness->isPublishable()) {
+        if (TimetableFreshness::InvalidThresholds === $freshness) {
+            return $this->board($date, $direction, BoardState::ThresholdsInvalid, $fetchedAt);
+        }
+        if (TimetableFreshness::Suspended === $freshness) {
             return $this->board($date, $direction, BoardState::Suspended, $fetchedAt);
         }
 
@@ -100,7 +116,6 @@ final readonly class GetDailyFlights
                 $entry->originAirport,
                 $entry->destinationAirport,
                 self::scheduledAt($date, self::boardTime($direction, $entry)),
-                null,
                 // Timetable only: never shown as on time (CLAUDE.md §6).
                 FlightStatus::Scheduled,
             );

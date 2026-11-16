@@ -33,23 +33,31 @@
                     <time datetime="{{ board.fetchedAt|date('c') }}">{{ board.fetchedAt|date('Y年n月j日 H:i') }}</time>（日本時間）
                 {%- elseif state == 'FetchTimeUnknown' -%}
                     取得日時を確認できません
+                {%- elseif state == 'ReadFailed' -%}
+                    確認できません
                 {%- else -%}
                     未取得
                 {%- endif -%}
             </dd>
             <dt>取得元</dt>
-            <dd>{{ board.sourceName ?? 'なし' }}</dd>
+            <dd>{{ board.sourceName ?? (state == 'ReadFailed' ? '確認できません' : 'なし') }}</dd>
         </dl>
 
-        {% if state == 'NeverFetched' %}
+        {% if state == 'NeverFetched' or state == 'ReadFailed' %}
             <div class="message message--error" role="status">
                 <p class="message-title">運航情報を取得できません</p>
                 <p>現在、本サイトでは便の情報を表示できません。{{ official_sentence }}</p>
             </div>
-        {% elseif state == 'Suspended' or state == 'FetchTimeUnknown' %}
+        {% elseif state == 'Suspended' %}
             <div class="message message--error" role="status">
                 <p class="message-title">運航情報を取得できません</p>
                 <p>時刻表を一定期間取得できていないため、表示を停止しています。{{ official_sentence }}</p>
+            </div>
+        {% elseif state == 'ThresholdsInvalid' or state == 'FetchTimeUnknown' %}
+            {# The fetch may be recent here, so the text does not blame it. #}
+            <div class="message message--error" role="status">
+                <p class="message-title">運航情報を取得できません</p>
+                <p>時刻表の表示を停止しています。{{ official_sentence }}</p>
             </div>
         {% elseif state == 'OutsidePublishedPeriod' %}
             <p class="board-empty">本サイトには表示できる便の情報がありません。{{ official_sentence }}</p>
@@ -73,7 +81,8 @@
                                 <th scope="col">便名</th>
                                 <th scope="col">区間</th>
                                 <th scope="col">{{ time_heading }}</th>
-                                <th scope="col">変更後（見込み）</th>
+                                {# No 変更後（見込み） column until operation data is shown (Phase 2):
+                                   an empty cell would read as "no change" (CLAUDE.md §6). #}
                                 <th scope="col">運航状況</th>
                             </tr>
                         </thead>
@@ -83,13 +92,6 @@
                                     <th scope="row">{{ flight.flightNumber }}</th>
                                     <td>{{ flight.origin }} → {{ flight.destination }}</td>
                                     <td><time datetime="{{ flight.scheduledAt|date('c') }}">{{ flight.scheduledAt|date('H:i') }}</time></td>
-                                    <td>
-                                        {%- if flight.estimatedAt -%}
-                                            <time datetime="{{ flight.estimatedAt|date('c') }}">{{ flight.estimatedAt|date('H:i') }}</time>
-                                        {%- else -%}
-                                            <span aria-hidden="true">—</span><span class="visually-hidden">なし</span>
-                                        {%- endif -%}
-                                    </td>
                                     <td><span class="status {{ flight_status_modifier(flight.status) }}">{{ flight_status_label(flight.status) }}</span></td>
                                 </tr>
                             {% endfor %}

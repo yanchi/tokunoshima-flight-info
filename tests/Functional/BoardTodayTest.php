@@ -12,6 +12,8 @@ use App\Domain\Flight\Direction;
 use App\Domain\Flight\Weekday;
 use App\Tests\Support\FictionalTimetable;
 use App\Tests\Support\ResetsDatabaseSchema;
+use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Tools\SchemaTool;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\Clock;
@@ -160,8 +162,8 @@ final class BoardTodayTest extends WebTestCase
 
         self::assertSelectorNotExists('[role="status"]');
         self::assertSame([
-            ['ZZ1001', 'TKN → ZZZ', '09:05', '—なし', '運航状況未確認'],
-            ['ZZ1005', 'TKN → ZZZ', '15:00', '—なし', '運航状況未確認'],
+            ['ZZ1001', 'TKN → ZZZ', '09:05', '運航状況未確認'],
+            ['ZZ1005', 'TKN → ZZZ', '15:00', '運航状況未確認'],
         ], $this->rows($crawler, 'table.flights'));
         self::assertSelectorNotExists('.noted-flights');
         self::assertSelectorExists('table.flights time[datetime="2026-11-16T09:05:00+09:00"]');
@@ -174,7 +176,7 @@ final class BoardTodayTest extends WebTestCase
 
         $crawler = $this->client->request('GET', '/?direction=arrival');
 
-        self::assertSame([['ZZ1002', 'ZZZ → TKN', '11:10', '—なし', '運航状況未確認']], $this->rows($crawler, 'table.flights'));
+        self::assertSame([['ZZ1002', 'ZZZ → TKN', '11:10', '運航状況未確認']], $this->rows($crawler, 'table.flights'));
         self::assertSelectorTextSame('table.flights thead th:nth-child(3)', '到着予定');
     }
 
@@ -189,7 +191,7 @@ final class BoardTodayTest extends WebTestCase
         $crawler = $this->client->request('GET', '/');
 
         $main = $crawler->filter('.board > .table-wrap table.flights');
-        self::assertSame([['ZZ1001', 'TKN → ZZZ', '09:00', '—なし', '運航状況未確認']], $this->rows($main));
+        self::assertSame([['ZZ1001', 'TKN → ZZZ', '09:00', '運航状況未確認']], $this->rows($main));
         self::assertSelectorTextSame('#noted-heading', '備考のある便');
         self::assertSame(
             [['ZZ1003', 'TKN → ZZZ', '備考参照', '11/16-23・テスト用の<備考>', '運航状況未確認']],
@@ -268,9 +270,35 @@ final class BoardTodayTest extends WebTestCase
 
         $crawler = $this->client->request('GET', '/');
 
-        self::assertSelectorTextContains('.message--error', '時刻表を一定期間取得できていないため、表示を停止しています。');
+        self::assertSelectorTextContains('.message--error', '時刻表の表示を停止しています。'.self::OFFICIAL_SENTENCE);
+        // The fetch may be recent, so the text must not blame it.
+        self::assertSelectorTextNotContains('.message--error', '一定期間取得できていない');
         self::assertSelectorNotExists('table.flights');
         self::assertSame(['取得日時を確認できません', '公共交通オープンデータセンター'], $this->meta($crawler));
+    }
+
+    public function testMissingTablesShowAnUnavailableBoardInsteadOfAnError(): void
+    {
+        /** @var EntityManagerInterface $entityManager */
+        $entityManager = static::getContainer()->get(EntityManagerInterface::class);
+        new SchemaTool($entityManager)->dropSchema($entityManager->getMetadataFactory()->getAllMetadata());
+
+        $crawler = $this->client->request('GET', '/');
+
+        self::assertResponseIsSuccessful();
+        self::assertSelectorTextContains('.message--error', '運航情報を取得できません');
+        self::assertSelectorTextContains('.message--error', '現在、本サイトでは便の情報を表示できません。'.self::OFFICIAL_SENTENCE);
+        self::assertSame(['確認できません', '確認できません'], $this->meta($crawler));
+    }
+
+    public function testPublishedBoardHasNoEstimatedTimeColumn(): void
+    {
+        $this->storeDepartures('2026-11-15T23:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $this->publish();
+
+        $crawler = $this->client->request('GET', '/');
+
+        self::assertSame(['便名', '区間', '出発予定', '運航状況'], $crawler->filter('table.flights thead th')->each(static fn (Crawler $th): string => $th->text()));
     }
 
     public function testWithdrawnDirectionIsNotShown(): void

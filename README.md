@@ -15,6 +15,8 @@ composer install
 php bin/console doctrine:migrations:migrate   # DB（SQLite）のテーブルを作る・更新する
 ```
 
+デプロイでは、アプリを公開する前に `doctrine:migrations:migrate` を実行する。テーブルがないと、`/` は「運航情報を取得できません」の表示になる（エラーはログに残る）。SQLite は、`DATABASE_URL` のパスにファイルがないと空のファイルを作るので、パスを誤っても気づきにくい。永続化するボリュームのパスと合っているかを確かめる。
+
 ODPT のアクセストークンなどの認証情報は `.env.local` に書く（Git にコミットしない）。`.env` にはコミットしてよい既定値だけを置く。
 
 | 環境変数 | 内容 |
@@ -22,7 +24,7 @@ ODPT のアクセストークンなどの認証情報は `.env.local` に書く�
 | `APP_SECRET` | Symfony のシークレット。値は Git にコミットしない。本番での渡し方はデプロイ手順で決める（#6） |
 | `ODPT_CONSUMER_KEY` | ODPT のアクセストークン（`.env.local` のみ） |
 | `DATABASE_URL` | DB の接続先。既定は環境ごとの SQLite ファイル（`var/data_<環境>.db`）。本番ではファイルを永続化するボリュームに置く（置き場所はデプロイ手順で決める） |
-| `CONTACT_ADDRESS` | 公式運航情報の案内に出す問い合わせ先。空の間は「お問い合わせは〇〇まで。」の文を出さない。空でよいのは開発・テスト環境だけで、本番公開前に必ず設定する。プレースホルダーの「〇〇」（「○○」も）を含む値は、デプロイ前チェックで未設定として扱う |
+| `CONTACT_ADDRESS` | 問い合わせ先のメールアドレス。公式運航情報の案内と、全ページのフッターの ODPT のクレジット（「以下のメールアドレスにお願いします」）に出すので、メールアドレスを設定する。空の間は「お問い合わせは〇〇まで。」の文を出さない。空でよいのは開発・テスト環境だけで、本番公開前に必ず設定する。プレースホルダーの「〇〇」（「○○」も）を含む値は、デプロイ前チェックで未設定として扱う |
 
 ## 開発コマンド
 
@@ -38,10 +40,10 @@ APP_ENV=prod php bin/console app:check-deploy-config  # 本番デプロイ前チ
 ## ディレクトリ構成
 
 - `src/Domain/`   — ドメイン層（便名・空港コード・運航状況・運航日・発着方向・鮮度判定）
-- `src/Application/` — ユースケース（`GetDailyFlights`）、表示用DTO、ポート（`FlightBoardRepositoryInterface`、`TimetableProviderInterface`、`TimetableRepositoryInterface`）
-- `src/Infrastructure/` — ポートの実装。画面は、データソース未承認のため常に「データなし」を返す `NoDataFlightBoardRepository` を読む。ODPT の時刻表の取得（`Provider/Odpt/`）と、方向ごとの時刻表の保存（`Persistence/Doctrine/`）は、まだ画面にも同期の処理にもつないでいない
+- `src/Application/` — ユースケース（`GetDailyFlights`、`SyncTimetable`、`SetTimetableGate` など）、表示用DTO、照合のゲート（`Gate/`）、ポート（`TimetableProviderInterface`、`TimetableRepositoryInterface`、`TimetableGateRepositoryInterface` など）
+- `src/Infrastructure/` — ポートの実装。ODPT の時刻表の取得（`Provider/Odpt/`）と、時刻表・ゲートの保存（`Persistence/Doctrine/`）。画面は、保存した時刻表をゲートの公開範囲と鮮度の判定に従って表示する（`docs/data-source-verification.md` §7 手順 7・§8）
 - `src/Presentation/Controller/` — 画面（`/` 本日の発着一覧）
-- `src/Presentation/Twig/` — 表示ルール（運航状況ラベル、データが古いときの表示の抑止）
+- `src/Presentation/Twig/` — 表示ルール（運航状況ラベル）
 - `config/`       — Symfony の設定
 - `migrations/`   — Doctrine のマイグレーション
 - `templates/`    — Twig テンプレート

@@ -25,6 +25,11 @@ interface TimetableGateRepositoryInterface
      * timetable repository reads and writes inside it. Whatever the callback
      * throws rolls everything back and is thrown again.
      *
+     * Reads inside it must see one snapshot (the board relies on this).
+     * SQLite gives that; on a database whose default is READ COMMITTED
+     * (e.g. PostgreSQL), the implementation must set REPEATABLE READ or
+     * stricter.
+     *
      * @template T
      *
      * @param callable(): T $callback
