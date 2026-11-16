@@ -28,15 +28,25 @@ final class InMemoryTimetableGateRepository implements TimetableGateRepositoryIn
 
     public int $transactions = 0;
 
+    public bool $inTransaction = false;
+
+    /** @var list<bool> whether each findCurrentState() call ran inside a transaction */
+    public array $stateReadsInTransaction = [];
+
     public function transactional(callable $callback): mixed
     {
         ++$this->transactions;
-
-        return $callback();
+        $this->inTransaction = true;
+        try {
+            return $callback();
+        } finally {
+            $this->inTransaction = false;
+        }
     }
 
     public function findCurrentState(): ?TimetableGateState
     {
+        $this->stateReadsInTransaction[] = $this->inTransaction;
         $version = $this->versions[\count($this->versions) - 1] ?? null;
         if (null === $version) {
             return null;

@@ -158,6 +158,15 @@ h2 {
     white-space: nowrap;
 }
 
+.flights .flight-note {
+    white-space: normal;
+    min-width: 12rem;
+}
+
+.noted-flights {
+    margin-top: 1.5rem;
+}
+
 .status--cancelled,
 .status--delayed {
     font-weight: bold;
@@ -192,7 +201,16 @@ h2 {
     margin: 0;
 }
 
-.official-notice p + p {
+.data-credit {
+    margin-top: 1rem;
+}
+
+.data-credit p {
+    margin: 0;
+}
+
+.official-notice p + p,
+.data-credit p + p {
     margin-top: 0.5rem;
 }
 

@@ -87,6 +87,20 @@ final class TimetableFreshnessPolicyTest extends TestCase
         self::assertFalse(TimetableFreshness::InvalidThresholds->isPublishable());
     }
 
+    /**
+     * Invalid thresholds are reported before a future fetch time; callers
+     * that must hide a future time check it themselves (GetDailyFlights).
+     */
+    public function testInvalidThresholdsAreReportedBeforeAFutureFetchTime(): void
+    {
+        $policy = new TimetableFreshnessPolicy('', '604800');
+
+        self::assertSame(
+            TimetableFreshness::InvalidThresholds,
+            $policy->judge(new \DateTimeImmutable('2026-11-16T03:00:01Z'), new \DateTimeImmutable('2026-11-16T03:00:00Z')),
+        );
+    }
+
     public function testOnlyFreshAndWarningArePublishable(): void
     {
         self::assertSame(

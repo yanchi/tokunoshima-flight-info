@@ -6,9 +6,9 @@ namespace App\Domain\Flight;
 
 /**
  * The two timetable freshness thresholds (docs/data-source-verification.md
- * §7 step 7 「時刻表の鮮度の閾値」). Unlike FreshnessPolicy, invalid values never
- * throw: a throwing constructor would break every page, while only the
- * timetable must stop being shown.
+ * §7 step 7 「時刻表の鮮度の閾値」). Invalid values never throw: a throwing
+ * constructor would break every page, while only the timetable must stop
+ * being shown.
  *
  * The values arrive as raw environment strings, so an unset or malformed
  * variable reaches this class instead of failing in the container.

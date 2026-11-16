@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional;
 
-use App\Application\DTO\FlightBoardSnapshot;
-use App\Application\Port\FlightBoardRepositoryInterface;
+use App\Application\DTO\TimetableEntry;
+use App\Application\Gate\WithdrawalCause;
+use App\Application\Port\TimetableGateRepositoryInterface;
+use App\Application\Port\TimetableRepositoryInterface;
 use App\Domain\Flight\Direction;
-use App\Domain\Flight\FlightStatus;
-use App\Domain\Flight\ServiceDate;
-use App\Infrastructure\Persistence\NoDataFlightBoardRepository;
-use App\Tests\Support\FictionalFlights;
-use App\Tests\Support\InMemoryFlightBoardRepository;
+use App\Domain\Flight\Weekday;
+use App\Tests\Support\FictionalTimetable;
+use App\Tests\Support\ResetsDatabaseSchema;
+use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\Tools\SchemaTool;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\Clock;
@@ -19,8 +21,14 @@ use Symfony\Component\Clock\MockClock;
 use Symfony\Component\Clock\NativeClock;
 use Symfony\Component\DomCrawler\Crawler;
 
+/**
+ * TEST ONLY data: fictional flights (FictionalTimetable), stored in the
+ * test database through the production repositories.
+ */
 final class BoardTodayTest extends WebTestCase
 {
+    use ResetsDatabaseSchema;
+
     private const OFFICIAL_SENTENCE = '最新の運航状況は、日本航空（JAL）公式サイトでご確認ください。';
 
     private KernelBrowser $client;
@@ -29,9 +37,10 @@ final class BoardTodayTest extends WebTestCase
     protected function setUp(): void
     {
         $this->defaultTimezone = date_default_timezone_get();
-        // 2026-10-29 23:30 UTC is already 10-30 in JST.
-        Clock::set(new MockClock('2026-10-29T23:30:00+00:00'));
+        // 2026-11-15 23:30 UTC is already Monday 11-16 in JST.
+        Clock::set(new MockClock('2026-11-15T23:30:00+00:00'));
         $this->client = static::createClient();
+        self::resetDatabaseSchema(static::getContainer());
     }
 
     protected function tearDown(): void
@@ -80,7 +89,7 @@ final class BoardTodayTest extends WebTestCase
     {
         $this->client->request('GET', '/');
 
-        self::assertSelectorTextSame('.board-date', '2026年10月30日（金）');
+        self::assertSelectorTextSame('.board-date', '2026年11月16日（月）');
     }
 
     public function testDateDoesNotDependOnPhpDefaultTimezone(): void
@@ -90,7 +99,7 @@ final class BoardTodayTest extends WebTestCase
 
         $this->client->request('GET', '/');
 
-        self::assertSelectorTextSame('.board-date', '2026年10月30日（金）');
+        self::assertSelectorTextSame('.board-date', '2026年11月16日（月）');
     }
 
     public function testWithoutDataShowsUnavailableMessage(): void
@@ -101,15 +110,6 @@ final class BoardTodayTest extends WebTestCase
         self::assertSelectorTextContains('[role="status"]', self::OFFICIAL_SENTENCE);
         self::assertSelectorNotExists('table.flights');
         self::assertSame(['未取得', 'なし'], $crawler->filter('.board-meta dd')->each(static fn (Crawler $dd) => $dd->text()));
-    }
-
-    public function testProductionWiringHasNoData(): void
-    {
-        // @phpstan-ignore staticMethod.alreadyNarrowedType (PHPStan reads the type from the container XML; the runtime wiring is what this test guards)
-        self::assertInstanceOf(
-            NoDataFlightBoardRepository::class,
-            static::getContainer()->get(FlightBoardRepositoryInterface::class),
-        );
     }
 
     public function testOmitsContactSentenceWhileContactAddressIsUnset(): void
@@ -137,88 +137,230 @@ final class BoardTodayTest extends WebTestCase
         );
     }
 
-    public function testTimetableOnlyFlightIsNotShownAsOnTime(): void
+    public function testFetchedButNotPublishedShowsNoFlights(): void
     {
-        $this->useSnapshot(Direction::Departure, new FlightBoardSnapshot(
-            [FictionalFlights::departure(FlightStatus::Scheduled, '2026-10-30T10:05:00+09:00')],
-            new \DateTimeImmutable('2026-10-29T23:25:00+00:00'),
-            'test source',
-        ));
+        $this->storeDepartures('2026-11-15T23:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
 
         $crawler = $this->client->request('GET', '/');
 
         self::assertSelectorNotExists('[role="status"]');
-        self::assertSame(['ZZ1001', 'TKN → ZZZ', '10:05', '—なし', '運航状況未確認'], $this->firstRowCells($crawler));
-        self::assertSelectorTextSame('.board-meta dd', '2026年10月30日 08:25（日本時間）');
+        self::assertSelectorNotExists('table.flights');
+        self::assertSelectorTextSame('.board-empty', '本サイトには表示できる便の情報がありません。'.self::OFFICIAL_SENTENCE);
+        self::assertSame(['2026年11月16日 08:00（日本時間）', '公共交通オープンデータセンター'], $this->meta($crawler));
     }
 
-    public function testReadsArrivalsOnTheArrivalTab(): void
+    public function testPublishedTimetableIsShownAsUnconfirmed(): void
     {
-        $this->useSnapshot(Direction::Arrival, new FlightBoardSnapshot(
-            [FictionalFlights::arrival(FlightStatus::Delayed, '2026-10-30T11:00:00+09:00', '2026-10-30T11:25:00+09:00')],
-            new \DateTimeImmutable('2026-10-29T23:25:00+00:00'),
-            'test source',
-        ));
-
-        $crawler = $this->client->request('GET', '/?direction=arrival');
-
-        self::assertSame(['ZZ1002', 'ZZZ → TKN', '11:00', '11:25', '遅延'], $this->firstRowCells($crawler));
-        self::assertSelectorTextSame('table.flights thead th:nth-child(3)', '到着予定');
-    }
-
-    public function testShowsCancelledAndUnknownFlights(): void
-    {
-        $this->useSnapshot(Direction::Departure, new FlightBoardSnapshot(
-            [
-                FictionalFlights::departure(FlightStatus::Cancelled, '2026-10-30T10:05:00+09:00'),
-                FictionalFlights::departure(FlightStatus::Unknown, '2026-10-30T15:00:00+09:00'),
-            ],
-            new \DateTimeImmutable('2026-10-29T23:25:00+00:00'),
-            'test source',
-        ));
+        $this->storeDepartures('2026-11-15T23:00:00Z', [
+            FictionalTimetable::departure('ZZ1005', Weekday::Monday, '15:00'),
+            FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:05'),
+            FictionalTimetable::departure('ZZ1003', Weekday::Tuesday, '10:00'),
+        ]);
+        $this->publish();
 
         $crawler = $this->client->request('GET', '/');
 
-        self::assertSame(['欠航', '状況不明'], $crawler->filter('table.flights tbody .status')->each(static fn (Crawler $s) => $s->text()));
+        self::assertSelectorNotExists('[role="status"]');
+        self::assertSame([
+            ['ZZ1001', 'TKN → ZZZ', '09:05', '運航状況未確認'],
+            ['ZZ1005', 'TKN → ZZZ', '15:00', '運航状況未確認'],
+        ], $this->rows($crawler, 'table.flights'));
+        self::assertSelectorNotExists('.noted-flights');
+        self::assertSelectorExists('table.flights time[datetime="2026-11-16T09:05:00+09:00"]');
     }
 
-    public function testFetchedEmptyBoardDoesNotClaimThereAreNoFlights(): void
+    public function testArrivalTabShowsArrivals(): void
     {
-        $this->useSnapshot(Direction::Departure, new FlightBoardSnapshot([], new \DateTimeImmutable('2026-10-29T23:25:00+00:00'), 'test source'));
+        $this->store(Direction::Arrival, '2026-11-15T23:00:00Z', [FictionalTimetable::arrival('ZZ1002', Weekday::Monday, '11:10')]);
+        $this->publish();
+
+        $crawler = $this->client->request('GET', '/?direction=arrival');
+
+        self::assertSame([['ZZ1002', 'ZZZ → TKN', '11:10', '運航状況未確認']], $this->rows($crawler, 'table.flights'));
+        self::assertSelectorTextSame('table.flights thead th:nth-child(3)', '到着予定');
+    }
+
+    public function testNotedFlightsAreListedApartWithTheRawNote(): void
+    {
+        $this->storeDepartures('2026-11-15T23:00:00Z', [
+            FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00'),
+            FictionalTimetable::departure('ZZ1003', Weekday::Monday, '15:00', '11/16-23・テスト用の<備考>'),
+        ]);
+        $this->publish();
+
+        $crawler = $this->client->request('GET', '/');
+
+        $main = $crawler->filter('.board > .table-wrap table.flights');
+        self::assertSame([['ZZ1001', 'TKN → ZZZ', '09:00', '運航状況未確認']], $this->rows($main));
+        self::assertSelectorTextSame('#noted-heading', '備考のある便');
+        self::assertSame(
+            [['ZZ1003', 'TKN → ZZZ', '備考参照', '11/16-23・テスト用の<備考>', '運航状況未確認']],
+            $this->rows($crawler, '.noted-flights table'),
+        );
+        // The timetable time of a noted flight is not on the page.
+        self::assertStringNotContainsString('15:00', $crawler->filter('.board')->text());
+    }
+
+    public function testDayWithOnlyNotedFlightsPointsToTheNotedList(): void
+    {
+        $this->storeDepartures('2026-11-15T23:00:00Z', [FictionalTimetable::departure('ZZ1003', Weekday::Monday, '15:00', 'テスト用の備考')]);
+        $this->publish();
+
+        $this->client->request('GET', '/');
+
+        self::assertSelectorTextSame('.board-empty', 'この日の便は、すべて下の「備考のある便」に表示しています。');
+        self::assertSelectorExists('.noted-flights table');
+    }
+
+    public function testPublishedDayWithoutFlightsSaysSo(): void
+    {
+        $this->storeDepartures('2026-11-15T23:00:00Z', [FictionalTimetable::departure('ZZ1003', Weekday::Tuesday, '10:00')]);
+        $this->publish();
+
+        $this->client->request('GET', '/');
+
+        self::assertSelectorTextSame('.board-empty', '本サイトで取得した時刻表には、この日の便がありません。'.self::OFFICIAL_SENTENCE);
+        self::assertSelectorNotExists('table.flights');
+    }
+
+    public function testOverdueFetchWarnsButStillShowsTheTimetable(): void
+    {
+        $this->storeDepartures('2026-11-12T23:29:59Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $this->publish();
+
+        $crawler = $this->client->request('GET', '/');
+
+        self::assertSelectorTextContains('.message--warning', '最終取得から時間が経過しています');
+        self::assertSelectorTextContains('.message--warning', '時刻表をしばらく取得できていません。'.self::OFFICIAL_SENTENCE);
+        self::assertCount(1, $this->rows($crawler, 'table.flights'));
+    }
+
+    public function testSuspendedDirectionShowsTheLastFetchButNoFlights(): void
+    {
+        $this->storeDepartures('2026-11-08T23:29:59Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $this->publish();
+
+        $crawler = $this->client->request('GET', '/');
+
+        self::assertSelectorTextContains('.message--error', '運航情報を取得できません');
+        self::assertSelectorTextContains('.message--error', '時刻表を一定期間取得できていないため、表示を停止しています。'.self::OFFICIAL_SENTENCE);
+        self::assertSelectorNotExists('table.flights');
+        self::assertSelectorNotExists('.board-empty');
+        self::assertSame(['2026年11月9日 08:29（日本時間）', '公共交通オープンデータセンター'], $this->meta($crawler));
+    }
+
+    public function testOnlyTheStaleDirectionIsSuspended(): void
+    {
+        $this->storeDepartures('2026-11-08T23:29:59Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $this->store(Direction::Arrival, '2026-11-15T23:00:00Z', [FictionalTimetable::arrival('ZZ1002', Weekday::Monday, '11:10')]);
+        $this->publish();
+
+        $this->client->request('GET', '/?direction=arrival');
+
+        self::assertSelectorNotExists('[role="status"]');
+        self::assertSelectorExists('table.flights');
+    }
+
+    public function testFetchTimeInTheFutureIsNotShown(): void
+    {
+        $this->storeDepartures('2026-11-15T23:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $this->publish();
+        // The clock goes back after the save, e.g. a corrected system clock.
+        Clock::set(new MockClock('2026-11-15T22:00:00+00:00'));
+
+        $crawler = $this->client->request('GET', '/');
+
+        self::assertSelectorTextContains('.message--error', '時刻表の表示を停止しています。'.self::OFFICIAL_SENTENCE);
+        // The fetch may be recent, so the text must not blame it.
+        self::assertSelectorTextNotContains('.message--error', '一定期間取得できていない');
+        self::assertSelectorNotExists('table.flights');
+        self::assertSame(['取得日時を確認できません', '公共交通オープンデータセンター'], $this->meta($crawler));
+    }
+
+    public function testMissingTablesShowAnUnavailableBoardInsteadOfAnError(): void
+    {
+        /** @var EntityManagerInterface $entityManager */
+        $entityManager = static::getContainer()->get(EntityManagerInterface::class);
+        new SchemaTool($entityManager)->dropSchema($entityManager->getMetadataFactory()->getAllMetadata());
+
+        $crawler = $this->client->request('GET', '/');
+
+        self::assertResponseIsSuccessful();
+        self::assertSelectorTextContains('.message--error', '運航情報を取得できません');
+        self::assertSelectorTextContains('.message--error', '現在、本サイトでは便の情報を表示できません。'.self::OFFICIAL_SENTENCE);
+        self::assertSame(['確認できません', '確認できません'], $this->meta($crawler));
+    }
+
+    public function testPublishedBoardHasNoEstimatedTimeColumn(): void
+    {
+        $this->storeDepartures('2026-11-15T23:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $this->publish();
+
+        $crawler = $this->client->request('GET', '/');
+
+        self::assertSame(['便名', '区間', '出発予定', '運航状況'], $crawler->filter('table.flights thead th')->each(static fn (Crawler $th): string => $th->text()));
+    }
+
+    public function testWithdrawnDirectionIsNotShown(): void
+    {
+        $this->storeDepartures('2026-11-15T23:00:00Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $version = $this->publish();
+        $this->gate()->withdraw($version, Direction::Departure, WithdrawalCause::Manual, new \DateTimeImmutable('2026-11-15T23:10:00Z'));
 
         $this->client->request('GET', '/');
 
         self::assertSelectorTextSame('.board-empty', '本サイトには表示できる便の情報がありません。'.self::OFFICIAL_SENTENCE);
+        self::assertSelectorNotExists('table.flights');
     }
 
-    public function testStaleDataWithholdsObservedStatusAndEstimate(): void
+    /**
+     * @param list<TimetableEntry> $entries
+     */
+    private function storeDepartures(string $requestStartedAt, array $entries): void
     {
-        $this->useSnapshot(Direction::Departure, new FlightBoardSnapshot(
-            [FictionalFlights::departure(FlightStatus::Delayed, '2026-10-30T10:05:00+09:00', '2026-10-30T10:40:00+09:00')],
-            new \DateTimeImmutable('2026-10-29T20:00:00+00:00'),
-            'test source',
-        ));
-
-        $crawler = $this->client->request('GET', '/');
-
-        self::assertSelectorTextContains('[role="status"]', '最終取得から時間が経過しています');
-        self::assertSelectorTextContains('[role="status"]', self::OFFICIAL_SENTENCE);
-        self::assertSame(['ZZ1001', 'TKN → ZZZ', '10:05', '—なし', '更新停止／要公式確認'], $this->firstRowCells($crawler));
-        self::assertSelectorNotExists('.status--delayed');
+        $this->store(Direction::Departure, $requestStartedAt, $entries);
     }
 
-    private function useSnapshot(Direction $direction, FlightBoardSnapshot $snapshot): void
+    /**
+     * @param list<TimetableEntry> $entries
+     */
+    private function store(Direction $direction, string $requestStartedAt, array $entries): void
     {
-        $repository = new InMemoryFlightBoardRepository();
-        $repository->put(ServiceDate::fromString('2026-10-30'), $direction, $snapshot);
-        static::getContainer()->set(FlightBoardRepositoryInterface::class, $repository);
+        /** @var TimetableRepositoryInterface $repository */
+        $repository = static::getContainer()->get('test.timetable_repository');
+        self::assertTrue($repository->save(FictionalTimetable::fetch($direction, $requestStartedAt, $entries))->outcome->replaced());
+    }
+
+    private function publish(): int
+    {
+        return $this->gate()->addVersion(FictionalTimetable::settings('2026-11-09', '2026-11-30'), new \DateTimeImmutable('2026-11-15T23:05:00Z'))->id;
+    }
+
+    private function gate(): TimetableGateRepositoryInterface
+    {
+        /** @var TimetableGateRepositoryInterface $gate */
+        $gate = static::getContainer()->get('test.timetable_gate_repository');
+
+        return $gate;
     }
 
     /**
      * @return list<string>
      */
-    private function firstRowCells(Crawler $crawler): array
+    private function meta(Crawler $crawler): array
     {
-        return $crawler->filter('table.flights tbody tr')->first()->filter('th, td')->each(static fn (Crawler $c) => $c->text());
+        return $crawler->filter('.board-meta dd')->each(static fn (Crawler $dd): string => $dd->text());
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    private function rows(Crawler $crawler, ?string $table = null): array
+    {
+        $scope = null === $table ? $crawler : $crawler->filter($table);
+
+        return $scope->filter('tbody tr')->each(
+            static fn (Crawler $row): array => $row->filter('th, td')->each(static fn (Crawler $c): string => $c->text()),
+        );
     }
 }

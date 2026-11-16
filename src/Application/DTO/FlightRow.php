@@ -11,9 +11,10 @@ use App\Domain\Flight\FlightStatus;
 /**
  * One line of the departure or arrival board.
  *
- * The times are the departure times on the departure board and the arrival
- * times on the arrival board. The estimated time is null unless the source
- * reports one; it is never derived from the scheduled time.
+ * The time is the departure time on the departure board and the arrival
+ * time on the arrival board. There is no estimated time until operation
+ * data is shown (Phase 2); it must then come from the source, never be
+ * derived from the scheduled time.
  */
 final readonly class FlightRow
 {
@@ -22,7 +23,6 @@ final readonly class FlightRow
         public AirportCode $origin,
         public AirportCode $destination,
         public \DateTimeImmutable $scheduledAt,
-        public ?\DateTimeImmutable $estimatedAt,
         public FlightStatus $status,
     ) {
     }

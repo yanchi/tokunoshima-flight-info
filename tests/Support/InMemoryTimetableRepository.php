@@ -88,8 +88,34 @@ final class InMemoryTimetableRepository implements TimetableRepositoryInterface
         return new TimetableSaveResult($outcome, $previous, $now);
     }
 
+    /** @var list<bool> whether each findLatest() call ran inside the watched gate's transaction */
+    public array $readsInTransaction = [];
+
+    private ?InMemoryTimetableGateRepository $watchedGate = null;
+
+    public function watchTransactionsOf(InMemoryTimetableGateRepository $gate): void
+    {
+        $this->watchedGate = $gate;
+    }
+
+    private ?\Throwable $readFailure = null;
+
+    public function failNextRead(\Throwable $exception): void
+    {
+        $this->readFailure = $exception;
+    }
+
     public function findLatest(Direction $direction): ?TimetableFetchResult
     {
+        if (null !== $this->readFailure) {
+            $failure = $this->readFailure;
+            $this->readFailure = null;
+            throw $failure;
+        }
+        if (null !== $this->watchedGate) {
+            $this->readsInTransaction[] = $this->watchedGate->inTransaction;
+        }
+
         return $this->stored[$direction->value] ?? null;
     }
 
