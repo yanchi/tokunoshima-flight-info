@@ -7,6 +7,11 @@ namespace App\Tests\Integration\Application;
 use App\Application\Gate\ComparedItemsHasher;
 use App\Application\Gate\ComparedPeriod;
 use App\Application\Gate\TimetableGateRequest;
+use App\Application\Gate\TimetableGateSettings;
+use App\Application\Gate\TimetableGateState;
+use App\Application\Gate\TimetableGateVersion;
+use App\Application\Gate\WithdrawalCause;
+use App\Application\Port\TimetableGateRepositoryInterface;
 use App\Application\Port\TimetableRepositoryInterface;
 use App\Application\UseCase\SetTimetableGate;
 use App\Application\UseCase\SyncTimetable;
@@ -159,6 +164,88 @@ final class SyncTimetableIntegrationTest extends KernelTestCase
     }
 
     /**
+     * Right after the version is set, an unchanged response must neither
+     * withdraw a direction nor be logged as (b): otherwise both directions
+     * would drop out on the first sync after a deploy.
+     */
+    public function testUnchangedResponseAfterSettingTheGateKeepsBothDirections(): void
+    {
+        $this->sync(new RecordingLogger())->execute();
+        $this->entityManager->clear();
+        $this->setGateFromTheDatabase();
+
+        self::mockTime('2026-11-12T03:10:00Z');
+        $logger = new RecordingLogger();
+        $report = $this->sync($logger)->execute();
+        $this->entityManager->clear();
+
+        self::assertTrue($report->isSuccessful(), implode("\n", $logger->lines()));
+        self::assertTrue($logger->has('info', 'Timetable saved', 'departure'));
+        self::assertSame([], self::getContainer()->get('test.timetable_gate_repository')->findCurrentState()?->withdrawn);
+        self::assertFalse($logger->has('warning', 'withdrawn'), implode("\n", $logger->lines()));
+        self::assertFalse($logger->has('notice', 'changed'), implode("\n", $logger->lines()));
+    }
+
+    /**
+     * A failure after comparison (a) withdrew the direction rolls the
+     * withdrawal back with the timetable (§7 step 7 「同期のトランザクション」).
+     */
+    public function testFailureAfterTheWithdrawalRollsBothBack(): void
+    {
+        $this->sync(new RecordingLogger())->execute();
+        $this->entityManager->clear();
+        $this->setGateFromTheDatabase();
+        $stored = $this->repository->findLatest(Direction::Departure)?->requestStartedAt;
+
+        self::mockTime('2026-11-12T03:10:00Z');
+        $this->departures[0] = FictionalOdptTimetable::record('TKN', 'ZZZ', 'Monday', [
+            FictionalOdptTimetable::flight('ZZ1001', '09:05', '09:40'),
+            FictionalOdptTimetable::flight('ZZ1003', '15:00', '15:40', ['ja' => 'テスト用の備考']),
+        ]);
+        $inner = self::getContainer()->get('test.timetable_gate_repository');
+        $failing = new class($inner) implements TimetableGateRepositoryInterface {
+            public function __construct(private readonly TimetableGateRepositoryInterface $inner)
+            {
+            }
+
+            public function transactional(callable $callback): mixed
+            {
+                return $this->inner->transactional($callback);
+            }
+
+            public function findCurrentState(): ?TimetableGateState
+            {
+                return $this->inner->findCurrentState();
+            }
+
+            public function addVersion(TimetableGateSettings $settings, \DateTimeImmutable $setAt): TimetableGateVersion
+            {
+                return $this->inner->addVersion($settings, $setAt);
+            }
+
+            public function withdraw(int $versionId, Direction $direction, WithdrawalCause $cause, \DateTimeImmutable $withdrawnAt): bool
+            {
+                $this->inner->withdraw($versionId, $direction, $cause, $withdrawnAt);
+                throw new \RuntimeException('TEST ONLY: fails after the withdrawal is written');
+            }
+
+            public function recordManualWithdrawal(int $versionId, Direction $direction, string $reason, \DateTimeImmutable $executedAt): void
+            {
+                $this->inner->recordManualWithdrawal($versionId, $direction, $reason, $executedAt);
+            }
+        };
+        $logger = new RecordingLogger();
+        $report = $this->sync($logger, $failing)->execute();
+        $this->entityManager->clear();
+
+        self::assertSame([Direction::Departure], $report->notSaved);
+        self::assertTrue($logger->has('error', 'Timetable save failed', 'departure'));
+        $gate = self::getContainer()->get('test.timetable_gate_repository');
+        self::assertSame([], $gate->findCurrentState()?->withdrawn);
+        self::assertEquals($stored, $this->repository->findLatest(Direction::Departure)?->requestStartedAt);
+    }
+
+    /**
      * Both directions withdrawn in one run: the second direction's
      * transaction reads and writes after the first one's withdrawal.
      */
@@ -213,7 +300,7 @@ final class SyncTimetableIntegrationTest extends KernelTestCase
         $setGate->execute(TimetableGateRequest::fromStrings('2026-11-11', '2027-01-04', '2026-11-12', str_repeat('a', 40), $dataDates[0], $dataDates[1]));
     }
 
-    private function sync(RecordingLogger $logger): SyncTimetable
+    private function sync(RecordingLogger $logger, ?TimetableGateRepositoryInterface $gate = null): SyncTimetable
     {
         $departures = $this->departures;
         $arrivals = $this->arrivals;
@@ -238,7 +325,7 @@ final class SyncTimetableIntegrationTest extends KernelTestCase
             self::getContainer()->get('test.clock'),
             new TimetableFreshnessPolicy('259200', '604800'),
             new ComparedItemsHasher(),
-            self::getContainer()->get('test.timetable_gate_repository'),
+            $gate ?? self::getContainer()->get('test.timetable_gate_repository'),
             $logger,
         );
     }

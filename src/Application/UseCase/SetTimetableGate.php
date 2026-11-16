@@ -6,6 +6,7 @@ namespace App\Application\UseCase;
 
 use App\Application\Gate\ComparedItemsHasher;
 use App\Application\Gate\ComparedPeriod;
+use App\Application\Gate\TimetableGateInputInvalid;
 use App\Application\Gate\TimetableGateRefused;
 use App\Application\Gate\TimetableGateRequest;
 use App\Application\Gate\TimetableGateSettings;
@@ -14,6 +15,7 @@ use App\Application\Port\TimetableGateRepositoryInterface;
 use App\Application\Port\TimetableLockInterface;
 use App\Application\Port\TimetableRepositoryInterface;
 use App\Domain\Flight\Direction;
+use App\Domain\Flight\ServiceDate;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -38,11 +40,17 @@ final readonly class SetTimetableGate
     }
 
     /**
+     * @throws TimetableGateInputInvalid                      when the comparison day is later than today (JST)
      * @throws TimetableGateRefused                           when the stored timetable does not match the request
      * @throws \App\Application\Port\TimetableLockUnavailable when a sync or another command holds the lock
      */
     public function execute(TimetableGateRequest $request): TimetableGateVersion
     {
+        // A comparison cannot have been made on a later day (2026-11-16 operator decision).
+        if ($request->comparedOn->compareTo(ServiceDate::fromInstant($this->clock->now())) > 0) {
+            throw new TimetableGateInputInvalid('The compared-on date is later than today (JST).');
+        }
+
         return $this->lock->runExclusively(fn (): TimetableGateVersion => $this->gate->transactional(function () use ($request): TimetableGateVersion {
             $hashes = [];
             foreach (Direction::cases() as $direction) {
@@ -80,6 +88,50 @@ final readonly class SetTimetableGate
             throw new TimetableGateRefused(\sprintf('The compared period is outside the stored %s timetable (%s).', $direction->value, null === $span ? 'no flights' : $span->from->toString().' to '.$span->to->toString()));
         }
 
+        $gap = self::firstDayWithoutEntries($period, $stored->entries);
+        if (null !== $gap) {
+            throw new TimetableGateRefused(\sprintf('No %s flight is valid on %s inside the compared period; a gap in the data must not pass for a compared day.', $direction->value, $gap->toString()));
+        }
+
         return $this->hasher->hash($period, $stored->entries);
+    }
+
+    /**
+     * The first day of the period on which no entry is valid, whatever its
+     * weekday (2026-11-16 operator decision, PR #26). A weekday without
+     * flights is not a gap: some entry is still valid on that date.
+     *
+     * @param list<\App\Application\DTO\TimetableEntry> $entries
+     */
+    private static function firstDayWithoutEntries(ComparedPeriod $period, array $entries): ?ServiceDate
+    {
+        $ranges = [];
+        foreach ($entries as $entry) {
+            if ($period->overlaps($entry->validFrom, $entry->validTo)) {
+                $ranges[] = $period->clamp($entry->validFrom, $entry->validTo);
+            }
+        }
+        usort($ranges, static fn (array $a, array $b): int => $a[0]->compareTo($b[0]));
+
+        // Sweep: the first day not covered so far must start the next range.
+        $next = $period->from;
+        foreach ($ranges as [$from, $to]) {
+            if ($from->compareTo($next) > 0) {
+                return $next;
+            }
+            if ($to->compareTo($next) >= 0) {
+                if ($to->equals($period->to)) {
+                    return null;
+                }
+                $next = self::dayAfter($to);
+            }
+        }
+
+        return $next;
+    }
+
+    private static function dayAfter(ServiceDate $day): ServiceDate
+    {
+        return ServiceDate::fromInstant($day->toDateTime()->modify('+1 day'));
     }
 }

@@ -35,6 +35,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 #[AsCommand(name: 'app:timetable:gate', description: 'Sets the compared timetable period, or withdraws a direction from publication')]
 final class TimetableGateCommand extends Command
 {
+    private const SET_OPTIONS = ['from', 'to', 'compared-on', 'record-commit', 'departure-data-date', 'arrival-data-date'];
+    private const WITHDRAW_OPTIONS = ['direction', 'reason'];
+
     public function __construct(
         private readonly SetTimetableGate $setTimetableGate,
         private readonly WithdrawTimetableDirection $withdrawTimetableDirection,
@@ -70,11 +73,19 @@ final class TimetableGateCommand extends Command
             return $this->refuse($io, $e->getMessage());
         } catch (TimetableLockUnavailable) {
             return $this->refuse($io, 'The timetable lock is held by a sync or another gate command; run again later.');
+        } catch (\Throwable $e) {
+            // The class only, as in the sync: a driver message may quote values.
+            // The transaction has been rolled back.
+            return $this->refuse($io, \sprintf('The gate command failed (%s).', $e::class));
         }
     }
 
     private function set(InputInterface $input, SymfonyStyle $io): int
     {
+        // An option of the other action is refused, not ignored: e.g. a
+        // "set --direction departure" meant as a withdrawal would clear
+        // every withdrawal.
+        self::refuseOptions($input, self::WITHDRAW_OPTIONS, 'set');
         $request = TimetableGateRequest::fromStrings(
             self::option($input, 'from'),
             self::option($input, 'to'),
@@ -99,6 +110,7 @@ final class TimetableGateCommand extends Command
 
     private function withdraw(InputInterface $input, SymfonyStyle $io): int
     {
+        self::refuseOptions($input, self::SET_OPTIONS, 'withdraw');
         $direction = Direction::tryFrom(self::option($input, 'direction') ?? '');
         if (null === $direction) {
             return $this->refuse($io, 'The direction must be "departure" or "arrival".');
@@ -128,6 +140,18 @@ final class TimetableGateCommand extends Command
         $io->error($message.' Nothing was changed.');
 
         return Command::FAILURE;
+    }
+
+    /**
+     * @param list<string> $names
+     */
+    private static function refuseOptions(InputInterface $input, array $names, string $action): void
+    {
+        foreach ($names as $name) {
+            if (null !== $input->getOption($name)) {
+                throw new TimetableGateInputInvalid(\sprintf('--%s cannot be used with "%s".', $name, $action));
+            }
+        }
     }
 
     private static function option(InputInterface $input, string $name): ?string

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Application\UseCase;
 
 use App\Application\Gate\ComparedItemsHasher;
+use App\Application\Gate\TimetableGateInputInvalid;
 use App\Application\Gate\TimetableGateRefused;
 use App\Application\Gate\TimetableGateRequest;
 use App\Application\Gate\WithdrawalCause;
@@ -56,11 +57,75 @@ final class SetTimetableGateTest extends TestCase
         self::assertSame([], $this->gate->findCurrentState()?->withdrawn);
     }
 
-    public function testSameDataDateInAnotherOffsetMatches(): void
+    public function testComparisonDayLaterThanTodayIsRefused(): void
     {
-        $version = $this->useCase()->execute(self::request(departure: '2026-08-21T04:00:00Z'));
+        try {
+            $this->useCase()->execute(self::request(comparedOn: '2026-11-17'));
+            self::fail('A comparison day in the future was accepted.');
+        } catch (TimetableGateInputInvalid $e) {
+            self::assertStringContainsString('later than today', $e->getMessage());
+        }
 
-        self::assertSame(1, $version->id);
+        self::assertSame([], $this->gate->versions);
+    }
+
+    public function testComparisonDayIsJudgedInJst(): void
+    {
+        // 2026-11-16T15:30Z is already 11-17 in JST.
+        $this->clock->modify('2026-11-16T15:30:00Z');
+
+        self::assertSame('2026-11-17', $this->useCase()->execute(self::request(comparedOn: '2026-11-17'))->settings->comparedOn->toString());
+    }
+
+    public function testComparisonDayToday(): void
+    {
+        self::assertSame(1, $this->useCase()->execute(self::request(comparedOn: '2026-11-16'))->id);
+    }
+
+    public function testGapInsideTheComparedPeriodIsRefused(): void
+    {
+        $this->timetables->store(SyncTimetableTest::fetched(Direction::Departure, '2026-11-16T02:00:00Z', entries: [
+            SyncTimetableTest::entryOf('ZZ1001', '2026-10-25', '2026-11-30'),
+            SyncTimetableTest::entryOf('ZZ1001', '2026-12-03', '2027-01-04'),
+        ]));
+
+        $this->expectRefusal('No departure flight is valid on 2026-12-01 inside the compared period');
+
+        $this->useCase()->execute(self::request());
+    }
+
+    public function testGapOutsideTheComparedPeriodIsAccepted(): void
+    {
+        $this->timetables->store(SyncTimetableTest::fetched(Direction::Departure, '2026-11-16T02:00:00Z', entries: [
+            SyncTimetableTest::entryOf('ZZ1001', '2026-10-25', '2026-11-05'),
+            SyncTimetableTest::entryOf('ZZ1001', '2026-11-11', '2027-01-04'),
+        ]));
+
+        self::assertSame(1, $this->useCase()->execute(self::request())->id);
+    }
+
+    public function testConsecutiveAndOverlappingPeriodsLeaveNoGap(): void
+    {
+        $this->timetables->store(SyncTimetableTest::fetched(Direction::Departure, '2026-11-16T02:00:00Z', entries: [
+            SyncTimetableTest::entryOf('ZZ1003', '2026-12-01', '2027-01-04'),
+            SyncTimetableTest::entryOf('ZZ1001', '2026-10-25', '2026-11-30'),
+            SyncTimetableTest::entryOf('ZZ1005', '2026-11-20', '2026-12-10'),
+        ]));
+
+        self::assertSame(1, $this->useCase()->execute(self::request())->id);
+    }
+
+    public function testGapOnTheLastComparedDayIsRefused(): void
+    {
+        // The data reaches beyond the period, so only the gap refuses it.
+        $this->timetables->store(SyncTimetableTest::fetched(Direction::Arrival, '2026-11-16T02:00:00Z', entries: [
+            SyncTimetableTest::entryOf('ZZ1002', '2026-10-25', '2027-01-03', Direction::Arrival),
+            SyncTimetableTest::entryOf('ZZ1004', '2027-01-05', '2027-01-10', Direction::Arrival),
+        ]));
+
+        $this->expectRefusal('No arrival flight is valid on 2027-01-04');
+
+        $this->useCase()->execute(self::request());
     }
 
     public function testSettingTheSameValuesAgainClearsTheWithdrawal(): void
@@ -141,7 +206,8 @@ final class SetTimetableGateTest extends TestCase
         string $to = '2027-01-04',
         string $departure = '2026-08-21T13:00:00+09:00',
         string $arrival = '2026-08-21T13:00:00+09:00',
+        string $comparedOn = '2026-11-12',
     ): TimetableGateRequest {
-        return TimetableGateRequest::fromStrings($from, $to, '2026-11-12', self::COMMIT, $departure, $arrival);
+        return TimetableGateRequest::fromStrings($from, $to, $comparedOn, self::COMMIT, $departure, $arrival);
     }
 }

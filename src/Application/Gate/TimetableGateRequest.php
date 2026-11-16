@@ -16,9 +16,10 @@ use App\Domain\Flight\ServiceDate;
 final readonly class TimetableGateRequest
 {
     private const COMMIT_PATTERN = '/\A[0-9a-f]{40}\z/';
-    // Seconds and an explicit offset are required; a value without a time
-    // zone cannot be compared as an instant.
-    private const DATA_DATE_PATTERN = '/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:Z|[+-]\d{2}:\d{2})\z/';
+    // The form the mapper accepts from ODPT (seconds, +09:00 only), so the
+    // value can be checked against the step 5 record by eye (2026-11-16
+    // operator decision, PR #26).
+    private const DATA_DATE_PATTERN = '/\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\+09:00\z/';
 
     private function __construct(
         public ComparedPeriod $period,
@@ -82,15 +83,14 @@ final readonly class TimetableGateRequest
 
     private static function dataDate(string $name, ?string $value): \DateTimeImmutable
     {
-        $message = \sprintf('The %s must be a date and time with seconds and a time zone offset, e.g. 2026-08-21T13:00:00+09:00.', $name);
+        $message = \sprintf('The %s must be a date and time with seconds and the +09:00 offset, e.g. 2026-08-21T13:00:00+09:00.', $name);
         if (null === $value || 1 !== preg_match(self::DATA_DATE_PATTERN, $value)) {
             throw new TimetableGateInputInvalid($message);
         }
 
         $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:sP', $value);
         // The round trip rejects overflowing values such as 02-30 or 25:00.
-        $normalised = str_ends_with($value, 'Z') ? substr($value, 0, -1).'+00:00' : $value;
-        if (false === $parsed || $parsed->format('Y-m-d\TH:i:sP') !== $normalised) {
+        if (false === $parsed || $parsed->format('Y-m-d\TH:i:sP') !== $value) {
             throw new TimetableGateInputInvalid($message);
         }
 

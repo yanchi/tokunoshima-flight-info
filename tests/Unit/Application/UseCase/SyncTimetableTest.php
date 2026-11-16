@@ -670,6 +670,14 @@ final class SyncTimetableTest extends TestCase
         );
     }
 
+    /**
+     * An entry valid from one day to another, for tests of other classes.
+     */
+    public static function entryOf(string $flightNumber, string $validFrom, string $validTo, Direction $direction = Direction::Departure): TimetableEntry
+    {
+        return self::entry($flightNumber, '09:00', $direction, $validTo, validFrom: $validFrom);
+    }
+
     private static function entry(string $flightNumber, string $originTime, Direction $direction = Direction::Departure, string $validTo = '2027-01-04', ?string $note = null, string $validFrom = '2026-10-25'): TimetableEntry
     {
         [$origin, $destination] = Direction::Departure === $direction ? ['TKN', 'ZZZ'] : ['ZZZ', 'TKN'];

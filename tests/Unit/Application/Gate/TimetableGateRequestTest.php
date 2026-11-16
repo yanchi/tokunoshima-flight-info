@@ -25,12 +25,11 @@ final class TimetableGateRequestTest extends TestCase
         self::assertEquals(new \DateTimeImmutable('2026-08-21T05:00:00Z'), $request->dataDateFor(Direction::Arrival));
     }
 
-    public function testOneDayPeriodAndUtcDataDateAreAccepted(): void
+    public function testOneDayPeriodIsAccepted(): void
     {
-        $request = self::request(['from' => '2026-11-11', 'to' => '2026-11-11', 'departure' => '2026-08-21T04:00:00Z']);
+        $request = self::request(['from' => '2026-11-11', 'to' => '2026-11-11']);
 
         self::assertTrue($request->period->from->equals($request->period->to));
-        self::assertEquals(new \DateTimeImmutable('2026-08-21T13:00:00+09:00'), $request->departureDataDate);
     }
 
     /**
@@ -53,6 +52,12 @@ final class TimetableGateRequestTest extends TestCase
         yield 'long commit' => [['commit' => self::COMMIT.'0'], 'commit'];
         yield 'commit with a newline' => [['commit' => self::COMMIT."\n"], 'commit'];
         yield 'dc:date without a time zone' => [['departure' => '2026-08-21T13:00:00'], 'departure-data-date'];
+        // +09:00 only, as on import (2026-11-16 operator decision).
+        yield 'dc:date in UTC (Z)' => [['departure' => '2026-08-21T04:00:00Z'], 'departure-data-date'];
+        yield 'dc:date at +00:00' => [['departure' => '2026-08-21T04:00:00+00:00'], 'departure-data-date'];
+        yield 'dc:date at -00:00' => [['departure' => '2026-08-21T04:00:00-00:00'], 'departure-data-date'];
+        yield 'dc:date at +99:00' => [['arrival' => '2026-08-21T13:00:00+99:00'], 'arrival-data-date'];
+        yield 'dc:date at +0900' => [['arrival' => '2026-08-21T13:00:00+0900'], 'arrival-data-date'];
         yield 'dc:date without seconds' => [['departure' => '2026-08-21T13:00+09:00'], 'departure-data-date'];
         yield 'dc:date with a fraction' => [['departure' => '2026-08-21T13:00:00.5+09:00'], 'departure-data-date'];
         yield 'dc:date not a day' => [['arrival' => '2026-02-30T13:00:00+09:00'], 'arrival-data-date'];

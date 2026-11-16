@@ -151,6 +151,23 @@ final class TimetableGateCommandTest extends KernelTestCase
         self::assertSame([Direction::Departure], $after->withdrawn);
     }
 
+    public function testOptionOfTheOtherActionIsRefused(): void
+    {
+        $this->tester->execute(self::setInput());
+        $state = $this->gate->findCurrentState();
+        self::assertNotNull($state);
+        $this->gate->withdraw($state->version->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, new \DateTimeImmutable());
+
+        // A set meant as a withdrawal would clear every withdrawal.
+        self::assertSame(Command::FAILURE, $this->tester->execute(self::setInput(['--direction' => 'arrival'])));
+        self::assertStringContainsString('--direction cannot be used with "set"', $this->tester->getDisplay());
+        self::assertSame(Command::FAILURE, $this->tester->execute(['action' => 'withdraw', '--direction' => 'arrival', '--reason' => 'test', '--from' => '2026-11-11']));
+
+        $after = $this->gate->findCurrentState();
+        self::assertSame($state->version->id, $after?->version->id);
+        self::assertSame([Direction::Departure], $after->withdrawn);
+    }
+
     public function testUnknownActionFails(): void
     {
         self::assertSame(Command::FAILURE, $this->tester->execute(['action' => 'release']));
