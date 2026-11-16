@@ -6,7 +6,9 @@ namespace App\Tests\Integration\Application;
 
 use App\Application\Gate\ComparedItemsHasher;
 use App\Application\Gate\ComparedPeriod;
+use App\Application\Gate\TimetableGateRequest;
 use App\Application\Port\TimetableRepositoryInterface;
+use App\Application\UseCase\SetTimetableGate;
 use App\Application\UseCase\SyncTimetable;
 use App\Domain\Flight\Direction;
 use App\Domain\Flight\ServiceDate;
@@ -129,6 +131,38 @@ final class SyncTimetableIntegrationTest extends KernelTestCase
         self::assertFalse($logger->has('notice', 'content changed', 'arrival'));
     }
 
+    /**
+     * The gate command's version is set from the database, and the next
+     * sync compares the changed response with it (§7 step 7, comparison (a)).
+     */
+    public function testChangeInsideTheComparedPeriodIsWithdrawnInTheDatabase(): void
+    {
+        $this->sync(new RecordingLogger())->execute();
+        $this->entityManager->clear();
+        $setGate = new SetTimetableGate(
+            $this->repository,
+            self::getContainer()->get('test.timetable_gate_repository'),
+            new SymfonyTimetableLock(new LockFactory(new FlockStore($this->lockDirectory)), new RecordingLogger()),
+            new ComparedItemsHasher(),
+            self::getContainer()->get('test.clock'),
+        );
+        $dataDates = array_map(fn (Direction $d): string => $this->repository->findLatest($d)?->latestDataDate->format(\DATE_ATOM) ?? '', Direction::cases());
+        $setGate->execute(TimetableGateRequest::fromStrings('2026-11-11', '2027-01-04', '2026-11-12', str_repeat('a', 40), $dataDates[0], $dataDates[1]));
+
+        self::mockTime('2026-11-12T03:10:00Z');
+        $this->departures[0] = FictionalOdptTimetable::record('TKN', 'ZZZ', 'Monday', [
+            FictionalOdptTimetable::flight('ZZ1001', '09:05', '09:40'),
+            FictionalOdptTimetable::flight('ZZ1003', '15:00', '15:40', ['ja' => 'テスト用の備考']),
+        ]);
+        $logger = new RecordingLogger();
+        $this->sync($logger)->execute();
+        $this->entityManager->clear();
+
+        $state = self::getContainer()->get('test.timetable_gate_repository')->findCurrentState();
+        self::assertSame([Direction::Departure], $state?->withdrawn, implode("\n", $logger->lines()));
+        self::assertTrue($logger->has('warning', 'withdrawn from publication', 'departure'));
+    }
+
     public function testHeldLockSkipsBothDirections(): void
     {
         $other = new LockFactory(new FlockStore($this->lockDirectory))->createLock('tkn-timetable');
@@ -170,6 +204,7 @@ final class SyncTimetableIntegrationTest extends KernelTestCase
             self::getContainer()->get('test.clock'),
             new TimetableFreshnessPolicy('259200', '604800'),
             new ComparedItemsHasher(),
+            self::getContainer()->get('test.timetable_gate_repository'),
             $logger,
         );
     }

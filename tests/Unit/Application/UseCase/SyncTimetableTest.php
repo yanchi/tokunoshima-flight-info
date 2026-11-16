@@ -7,6 +7,9 @@ namespace App\Tests\Unit\Application\UseCase;
 use App\Application\DTO\TimetableEntry;
 use App\Application\DTO\TimetableFetchResult;
 use App\Application\Gate\ComparedItemsHasher;
+use App\Application\Gate\ComparedPeriod;
+use App\Application\Gate\TimetableGateSettings;
+use App\Application\Gate\WithdrawalCause;
 use App\Application\Port\TimetableFetchFailed;
 use App\Application\Port\TimetableProviderInterface;
 use App\Application\UseCase\SyncTimetable;
@@ -16,6 +19,7 @@ use App\Domain\Flight\FlightNumber;
 use App\Domain\Flight\ServiceDate;
 use App\Domain\Flight\TimetableFreshnessPolicy;
 use App\Domain\Flight\Weekday;
+use App\Tests\Support\InMemoryTimetableGateRepository;
 use App\Tests\Support\InMemoryTimetableRepository;
 use App\Tests\Support\RecordingLogger;
 use App\Tests\Support\StubTimetableLock;
@@ -35,6 +39,7 @@ final class SyncTimetableTest extends TestCase
     private InMemoryTimetableRepository $repository;
     private StubTimetableProvider $provider;
     private RecordingLogger $logger;
+    private InMemoryTimetableGateRepository $gate;
 
     protected function setUp(): void
     {
@@ -42,6 +47,7 @@ final class SyncTimetableTest extends TestCase
         $this->repository = new InMemoryTimetableRepository($this->clock);
         $this->provider = new StubTimetableProvider();
         $this->logger = new RecordingLogger();
+        $this->gate = new InMemoryTimetableGateRepository();
     }
 
     public function testFirstRunSavesBothDirectionsAndSucceeds(): void
@@ -242,7 +248,7 @@ final class SyncTimetableTest extends TestCase
             }
         };
 
-        $report = new SyncTimetable($provider, $this->repository, new StubTimetableLock(), $this->clock, self::policy(), new ComparedItemsHasher(), $this->logger)->execute();
+        $report = new SyncTimetable($provider, $this->repository, new StubTimetableLock(), $this->clock, self::policy(), new ComparedItemsHasher(), $this->gate, $this->logger)->execute();
 
         self::assertSame([Direction::Departure], $report->notSaved);
         self::assertSame(\TypeError::class, $this->recordFor('Timetable fetch failed')['context']['exception']);
@@ -383,10 +389,182 @@ final class SyncTimetableTest extends TestCase
         };
         $this->repository->watchLock($lock);
 
-        new SyncTimetable($provider, $this->repository, $lock, $this->clock, self::policy(), new ComparedItemsHasher(), $this->logger)->execute();
+        new SyncTimetable($provider, $this->repository, $lock, $this->clock, self::policy(), new ComparedItemsHasher(), $this->gate, $this->logger)->execute();
 
         self::assertSame([false, false], $provider->lockedDuringFetch);
         self::assertSame([true, true], $this->repository->lockedDuringSave);
+    }
+
+    public function testChangeInsideTheComparedPeriodWithdrawsOnlyThatDirection(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $version = $this->setGate();
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:59:58Z', entries: [self::entry('ZZ1001', '09:05')]));
+
+        $report = $this->sync()->execute();
+
+        // (a) is not a failure of the run (§7 step 7 「同期の終了コード」).
+        self::assertTrue($report->isSuccessful());
+        $state = $this->gate->findCurrentState();
+        self::assertNotNull($state);
+        self::assertNull($state->publishedPeriod(Direction::Departure));
+        self::assertNotNull($state->publishedPeriod(Direction::Arrival));
+        self::assertSame($version, $this->gate->withdrawals[0]['version']);
+        self::assertSame(WithdrawalCause::ComparedItemsChanged, $this->gate->withdrawals[0]['cause']);
+        self::assertTrue($this->logger->has('warning', 'withdrawn from publication', 'departure'));
+        self::assertSame($version, $this->recordFor('withdrawn from publication')['context']['gate_version']);
+        // (a) takes precedence over (b).
+        self::assertFalse($this->logger->has('notice', 'outside the compared period'));
+        self::assertFalse($this->logger->has('warning', 'withdrawn', 'arrival'));
+    }
+
+    public function testChangedNoteInsideTheComparedPeriodWithdraws(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $this->setGate();
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->provider->respond(Direction::Arrival, self::fetched(Direction::Arrival, '2026-11-12T02:59:58Z', entries: [self::entry('ZZ1001', '09:00', Direction::Arrival, note: 'テスト用の備考')]));
+
+        $this->sync()->execute();
+
+        self::assertSame([Direction::Arrival], $this->gate->findCurrentState()?->withdrawn);
+    }
+
+    public function testExtendedValidityIsLoggedAsAChangeOutsideAndStaysPublished(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $version = $this->setGate();
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:59:58Z', validTo: '2027-03-31'));
+
+        $this->sync()->execute();
+
+        self::assertSame([], $this->gate->findCurrentState()?->withdrawn);
+        self::assertTrue($this->logger->has('notice', 'outside the compared period (b)', 'departure'));
+        self::assertSame($version, $this->recordFor('outside the compared period')['context']['gate_version']);
+        self::assertFalse($this->logger->has('notice', 'outside the compared period', 'arrival'));
+    }
+
+    public function testValidityShortenedToTheLastComparedDayIsAChangeOutside(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $this->setGate(to: '2026-12-31');
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:59:58Z', validTo: '2026-12-31'));
+
+        $this->sync()->execute();
+
+        self::assertSame([], $this->gate->findCurrentState()?->withdrawn);
+        self::assertTrue($this->logger->has('notice', 'outside the compared period (b)', 'departure'));
+    }
+
+    public function testValidityShortenedBeforeTheLastComparedDayWithdraws(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $this->setGate(to: '2026-12-31');
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:59:58Z', validTo: '2026-12-30'));
+
+        $this->sync()->execute();
+
+        self::assertSame([Direction::Departure], $this->gate->findCurrentState()?->withdrawn);
+    }
+
+    public function testWithdrawnDirectionStaysWithdrawnWhenTheDataComesBack(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $this->setGate();
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:30:00Z', entries: [self::entry('ZZ1001', '09:05')]));
+        $this->provider->respond(Direction::Arrival, self::fetched(Direction::Arrival, '2026-11-12T02:30:00Z'));
+        $this->sync()->execute();
+
+        $this->logger = new RecordingLogger();
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->sync()->execute();
+
+        self::assertSame([Direction::Departure], $this->gate->findCurrentState()?->withdrawn);
+        self::assertCount(1, $this->gate->withdrawals);
+        // Logged once, when it was withdrawn; the change back is not (b).
+        self::assertFalse($this->logger->has('warning', 'withdrawn from publication'));
+        self::assertFalse($this->logger->has('notice', 'outside the compared period'));
+        self::assertTrue($this->logger->has('notice', 'changed since the previous fetch (withdrawn from publication)', 'departure'));
+    }
+
+    public function testNewVersionClearsTheWithdrawal(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $this->setGate();
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:30:00Z', entries: [self::entry('ZZ1001', '09:05')]));
+        $this->provider->respond(Direction::Arrival, self::fetched(Direction::Arrival, '2026-11-12T02:30:00Z'));
+        $this->sync()->execute();
+
+        $this->setGate();
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:59:58Z', entries: [self::entry('ZZ1001', '09:05')]));
+        $this->provider->respond(Direction::Arrival, self::fetched(Direction::Arrival, '2026-11-12T02:59:58Z'));
+        $this->sync()->execute();
+
+        self::assertSame([], $this->gate->findCurrentState()?->withdrawn);
+    }
+
+    public function testNotReplacedDirectionIsNotCompared(): void
+    {
+        $this->storeBoth('2026-11-12T02:59:58Z');
+        $this->setGate();
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:00:00Z', entries: [self::entry('ZZ1001', '09:05')]));
+
+        $this->sync()->execute();
+
+        self::assertSame([], $this->gate->withdrawals);
+    }
+
+    public function testFailedComparisonWithTheGateKeepsTheStoredTimetable(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $this->setGate();
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        // TEST ONLY: invalid UTF-8 bypassing the mapper, so comparison (a) fails.
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:59:58Z', entries: [self::entry('ZZ1001', '09:00', note: "\xff")]));
+
+        $report = $this->sync()->execute();
+
+        self::assertSame([Direction::Departure], $report->notSaved);
+        self::assertSame('2026-11-12T02:00:00+00:00', $this->repository->findLatest(Direction::Departure)?->requestStartedAt->format(\DATE_ATOM));
+        self::assertSame([], $this->gate->withdrawals);
+        self::assertTrue($this->logger->has('error', 'Timetable save failed', 'departure'));
+    }
+
+    private function storeBoth(string $requestStartedAt): void
+    {
+        foreach (Direction::cases() as $direction) {
+            $this->repository->store(self::fetched($direction, $requestStartedAt));
+        }
+    }
+
+    /**
+     * A version made from the stored timetable, as the gate command makes it.
+     *
+     * @return int the version id
+     */
+    private function setGate(string $from = '2026-11-11', string $to = '2027-01-04'): int
+    {
+        $period = new ComparedPeriod(ServiceDate::fromString($from), ServiceDate::fromString($to));
+        $hasher = new ComparedItemsHasher();
+        $departure = $this->repository->findLatest(Direction::Departure);
+        $arrival = $this->repository->findLatest(Direction::Arrival);
+        self::assertNotNull($departure);
+        self::assertNotNull($arrival);
+
+        return $this->gate->addVersion(new TimetableGateSettings(
+            $period,
+            ServiceDate::fromString('2026-11-12'),
+            str_repeat('a', 40),
+            $departure->latestDataDate,
+            $arrival->latestDataDate,
+            $hasher->hash($period, $departure->entries),
+            $hasher->hash($period, $arrival->entries),
+        ), $this->clock->now())->id;
     }
 
     /**
@@ -445,6 +623,7 @@ final class SyncTimetableTest extends TestCase
             $this->clock,
             $policy ?? self::policy(),
             new ComparedItemsHasher(),
+            $this->gate,
             $this->logger,
         );
     }
