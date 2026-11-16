@@ -5,6 +5,18 @@ framework:
     # Note that the session will be started ONLY if you read or write from it.
     session: true
 
+    # A bad URL from a visitor is not a fault of the site: log it at info, below
+    # the prod fingers_crossed action level, so it neither alerts nor flushes the
+    # buffer (docs/data-source-verification.md §8 「エラーの画面」). 5xx keep the
+    # default critical level.
+    exceptions:
+        Symfony\Component\HttpKernel\Exception\BadRequestHttpException:
+            log_level: info
+        Symfony\Component\HttpKernel\Exception\NotFoundHttpException:
+            log_level: info
+        Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException:
+            log_level: info
+
     #esi: true
     #fragments: true
 
