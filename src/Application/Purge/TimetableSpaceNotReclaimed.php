@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace App\Application\Purge;
 
 /**
- * The rows are deleted and committed, but the database file could not be
- * rewritten without them. Running the purge again frees the space.
+ * The rows are deleted and committed, but what follows the commit failed,
+ * so the database file may still hold their bytes. Running the purge again
+ * rewrites it.
  */
 final class TimetableSpaceNotReclaimed extends \RuntimeException
 {

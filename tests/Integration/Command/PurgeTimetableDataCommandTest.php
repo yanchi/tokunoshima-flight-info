@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Command;
 
 use App\Domain\Flight\Direction;
 use App\Infrastructure\Persistence\Doctrine\DoctrineTimetableDataPurger;
+use App\Infrastructure\Persistence\Doctrine\Entity\TimetableFetchRecord;
 use App\Tests\Support\ResetsDatabaseSchema;
 use App\Tests\Unit\Application\UseCase\SyncTimetableTest;
 use Doctrine\DBAL\Connection;
@@ -62,8 +63,18 @@ final class PurgeTimetableDataCommandTest extends KernelTestCase
         $this->tester = new CommandTester($application->find('app:timetable:purge'));
     }
 
+    protected function tearDown(): void
+    {
+        // The journal mode is stored in the file, so a WAL test must not leak it.
+        $this->connection->executeStatement('PRAGMA journal_mode = DELETE');
+        parent::tearDown();
+    }
+
     public function testPurgeDeletesEveryRowAndRewritesTheFile(): void
     {
+        self::assertSame('delete', $this->connection->fetchOne('PRAGMA journal_mode'));
+        self::assertTrue($this->fileContains(self::FLIGHT_NUMBER), 'Precondition: the flight number is in the file.');
+
         self::assertSame(Command::SUCCESS, $this->tester->execute(['--confirm' => true]));
 
         foreach ($this->tables() as $table) {
@@ -77,11 +88,32 @@ final class PurgeTimetableDataCommandTest extends KernelTestCase
         self::assertMatchesRegularExpression('/timetable_gate_manual_withdrawal\s+1 rows deleted/', $display);
         self::assertStringContainsString('[OK] Every stored timetable and gate row is deleted', $display);
 
-        $file = file_get_contents($this->databasePath());
-        self::assertIsString($file);
-        // Not assertStringNotContainsString: a failure would print the whole file.
-        self::assertFalse(str_contains($file, self::FLIGHT_NUMBER), 'The flight number is still in the database file.');
-        self::assertFalse(str_contains($file, self::REASON), 'The withdrawal reason is still in the database file.');
+        self::assertFalse($this->fileContains(self::FLIGHT_NUMBER), 'The flight number is still in the database file.');
+        self::assertFalse($this->fileContains(self::REASON), 'The withdrawal reason is still in the database file.');
+    }
+
+    public function testInWalModeTheMainFileIsCheckpointed(): void
+    {
+        self::assertSame('wal', $this->connection->fetchOne('PRAGMA journal_mode = WAL'));
+        self::assertTrue($this->fileContains(self::FLIGHT_NUMBER), 'Precondition: the flight number is in the file.');
+
+        self::assertSame(Command::SUCCESS, $this->tester->execute(['--confirm' => true]));
+
+        self::assertFalse($this->fileContains(self::FLIGHT_NUMBER), 'The flight number is still in the database file.');
+        self::assertFalse($this->fileContains(self::REASON), 'The withdrawal reason is still in the database file.');
+        $wal = $this->databasePath().'-wal';
+        self::assertTrue(!file_exists($wal) || 0 === filesize($wal), 'The -wal file is not truncated.');
+    }
+
+    public function testManagedEntitiesAreDetachedAfterThePurge(): void
+    {
+        $entityManager = self::getContainer()->get(EntityManagerInterface::class);
+        self::assertNotNull($entityManager->find(TimetableFetchRecord::class, Direction::Departure));
+
+        $this->tester->execute(['--confirm' => true]);
+
+        // Without clear(), find() would return the managed record without a query.
+        self::assertNull($entityManager->find(TimetableFetchRecord::class, Direction::Departure));
     }
 
     public function testTheRepositoriesReadNothingAfterThePurge(): void
@@ -139,6 +171,8 @@ final class PurgeTimetableDataCommandTest extends KernelTestCase
         foreach (['timetable_flight' => 2, 'timetable_gate_version' => 1, 'timetable_gate_withdrawal' => 1, 'timetable_gate_manual_withdrawal' => 1] as $table => $rows) {
             self::assertEquals($rows, $this->connection->fetchOne('SELECT COUNT(*) FROM '.$table), $table);
         }
+        // The entity manager is usable again after the failed transaction.
+        self::assertNotNull(self::getContainer()->get('test.timetable_gate_repository')->findCurrentState());
     }
 
     public function testEveryMappedEntityIsPurged(): void
@@ -163,6 +197,15 @@ final class PurgeTimetableDataCommandTest extends KernelTestCase
     private function countRows(): array
     {
         return array_map(fn (string $table): mixed => $this->connection->fetchOne('SELECT COUNT(*) FROM '.$table), $this->tables());
+    }
+
+    private function fileContains(string $needle): bool
+    {
+        // Not assertStringContainsString on the file: a failure would print all of it.
+        $file = file_get_contents($this->databasePath());
+        self::assertIsString($file);
+
+        return str_contains($file, $needle);
     }
 
     private function databasePath(): string

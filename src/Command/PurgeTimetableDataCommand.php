@@ -45,13 +45,13 @@ final class PurgeTimetableDataCommand extends Command
         try {
             $result = $this->purgeTimetableData->execute();
         } catch (TimetableLockUnavailable) {
-            $io->error('The timetable lock is held by a sync or a gate command; stop the sync and run again. Nothing was changed.');
+            $io->error('The timetable lock is held by a sync or a gate command; wait until it ends and run again. Nothing was changed.');
 
             return Command::FAILURE;
         } catch (TimetableSpaceNotReclaimed $e) {
             self::listDeleted($io, $e->deletedRows);
             // The class only, as in the sync: a driver message may quote values.
-            $io->error(\sprintf('The rows are deleted, but the database file still holds their bytes (%s). Run again to rewrite it.', get_debug_type($e->getPrevious())));
+            $io->error(\sprintf('The rows are deleted, but the database file may still hold their bytes (%s). Run again to rewrite it.', get_debug_type($e->getPrevious())));
 
             return Command::FAILURE;
         } catch (\Throwable $e) {

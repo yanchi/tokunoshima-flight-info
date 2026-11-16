@@ -17,13 +17,15 @@ use App\Application\Purge\TimetablePurgeResult;
 interface TimetableDataPurgerInterface
 {
     /**
-     * Deletes every row in one transaction, then frees the space the rows
-     * took in the database file where the database supports it. When the
+     * Deletes every row in one transaction, then rewrites the database file
+     * without the deleted rows where the database supports it (SQLite; in
+     * WAL mode also checkpointed back into the main file). When the
      * deletion fails, nothing is deleted and the exception is thrown again.
      *
      * @throws \App\Application\Purge\TimetableSpaceNotReclaimed when the rows are
-     *                                                           deleted but freeing the space
-     *                                                           failed; running it again frees it
+     *                                                           deleted but anything after the
+     *                                                           commit failed; running it again
+     *                                                           rewrites the file
      */
     public function purgeAll(): TimetablePurgeResult;
 }
