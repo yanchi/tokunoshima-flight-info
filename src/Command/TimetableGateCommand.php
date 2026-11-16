@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Application\Gate\TimetableGateInputInvalid;
 use App\Application\Gate\TimetableGateRefused;
 use App\Application\Gate\TimetableGateRequest;
 use App\Application\Port\TimetableLockUnavailable;
@@ -65,7 +66,7 @@ final class TimetableGateCommand extends Command
                 'withdraw' => $this->withdraw($input, $io),
                 default => $this->refuse($io, 'The action must be "set" or "withdraw".'),
             };
-        } catch (\InvalidArgumentException|TimetableGateRefused $e) {
+        } catch (TimetableGateInputInvalid|TimetableGateRefused $e) {
             return $this->refuse($io, $e->getMessage());
         } catch (TimetableLockUnavailable) {
             return $this->refuse($io, 'The timetable lock is held by a sync or another gate command; run again later.');

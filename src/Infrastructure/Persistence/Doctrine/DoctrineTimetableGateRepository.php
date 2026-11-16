@@ -84,7 +84,9 @@ final readonly class DoctrineTimetableGateRepository implements TimetableGateRep
             return false;
         }
 
-        $version = $this->entityManager->getReference(TimetableGateVersionRecord::class, $versionId)
+        // Looked up rather than referenced: SQLite does not enforce the foreign
+        // key unless foreign_keys is turned on, which this connection does not.
+        $version = $this->entityManager->find(TimetableGateVersionRecord::class, $versionId)
             ?? throw new \LogicException(\sprintf('Gate version %d does not exist.', $versionId));
         $this->entityManager->persist(new TimetableGateWithdrawal($version, $direction, $cause, $reason, $withdrawnAt));
         $this->entityManager->flush();

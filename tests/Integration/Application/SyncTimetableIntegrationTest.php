@@ -41,6 +41,8 @@ final class SyncTimetableIntegrationTest extends KernelTestCase
     private TimetableRepositoryInterface $repository;
     /** @var list<array<string, mixed>> */
     private array $departures;
+    /** @var list<array<string, mixed>> */
+    private array $arrivals;
     private EntityManagerInterface $entityManager;
     private string $lockDirectory;
 
@@ -56,6 +58,7 @@ final class SyncTimetableIntegrationTest extends KernelTestCase
 
         $this->repository = $container->get('test.timetable_repository');
         $this->departures = self::body(Direction::Departure);
+        $this->arrivals = self::body(Direction::Arrival);
         $this->lockDirectory = sys_get_temp_dir().'/tkn-lock-test-'.bin2hex(random_bytes(4));
         mkdir($this->lockDirectory);
     }
@@ -139,15 +142,7 @@ final class SyncTimetableIntegrationTest extends KernelTestCase
     {
         $this->sync(new RecordingLogger())->execute();
         $this->entityManager->clear();
-        $setGate = new SetTimetableGate(
-            $this->repository,
-            self::getContainer()->get('test.timetable_gate_repository'),
-            new SymfonyTimetableLock(new LockFactory(new FlockStore($this->lockDirectory)), new RecordingLogger()),
-            new ComparedItemsHasher(),
-            self::getContainer()->get('test.clock'),
-        );
-        $dataDates = array_map(fn (Direction $d): string => $this->repository->findLatest($d)?->latestDataDate->format(\DATE_ATOM) ?? '', Direction::cases());
-        $setGate->execute(TimetableGateRequest::fromStrings('2026-11-11', '2027-01-04', '2026-11-12', str_repeat('a', 40), $dataDates[0], $dataDates[1]));
+        $this->setGateFromTheDatabase();
 
         self::mockTime('2026-11-12T03:10:00Z');
         $this->departures[0] = FictionalOdptTimetable::record('TKN', 'ZZZ', 'Monday', [
@@ -161,6 +156,31 @@ final class SyncTimetableIntegrationTest extends KernelTestCase
         $state = self::getContainer()->get('test.timetable_gate_repository')->findCurrentState();
         self::assertSame([Direction::Departure], $state?->withdrawn, implode("\n", $logger->lines()));
         self::assertTrue($logger->has('warning', 'withdrawn from publication', 'departure'));
+    }
+
+    /**
+     * Both directions withdrawn in one run: the second direction's
+     * transaction reads and writes after the first one's withdrawal.
+     */
+    public function testBothDirectionsCanBeWithdrawnInOneRun(): void
+    {
+        $this->sync(new RecordingLogger())->execute();
+        $this->entityManager->clear();
+        $this->setGateFromTheDatabase();
+
+        self::mockTime('2026-11-12T03:10:00Z');
+        $this->departures[0] = FictionalOdptTimetable::record('TKN', 'ZZZ', 'Monday', [
+            FictionalOdptTimetable::flight('ZZ1001', '09:05', '09:40'),
+            FictionalOdptTimetable::flight('ZZ1003', '15:00', '15:40', ['ja' => 'テスト用の備考']),
+        ]);
+        $this->arrivals = [FictionalOdptTimetable::record('ZZZ', 'TKN', 'Monday', [FictionalOdptTimetable::flight('ZZ1002', '10:35', '11:10')])];
+        $logger = new RecordingLogger();
+        $report = $this->sync($logger)->execute();
+        $this->entityManager->clear();
+
+        self::assertTrue($report->isSuccessful(), implode("\n", $logger->lines()));
+        $state = self::getContainer()->get('test.timetable_gate_repository')->findCurrentState();
+        self::assertEquals([Direction::Departure, Direction::Arrival], $state?->withdrawn);
     }
 
     public function testHeldLockSkipsBothDirections(): void
@@ -180,11 +200,25 @@ final class SyncTimetableIntegrationTest extends KernelTestCase
         self::assertNull($this->repository->findLatest(Direction::Departure));
     }
 
+    private function setGateFromTheDatabase(): void
+    {
+        $setGate = new SetTimetableGate(
+            $this->repository,
+            self::getContainer()->get('test.timetable_gate_repository'),
+            new SymfonyTimetableLock(new LockFactory(new FlockStore($this->lockDirectory)), new RecordingLogger()),
+            new ComparedItemsHasher(),
+            self::getContainer()->get('test.clock'),
+        );
+        $dataDates = array_map(fn (Direction $d): string => $this->repository->findLatest($d)?->latestDataDate->format(\DATE_ATOM) ?? '', Direction::cases());
+        $setGate->execute(TimetableGateRequest::fromStrings('2026-11-11', '2027-01-04', '2026-11-12', str_repeat('a', 40), $dataDates[0], $dataDates[1]));
+    }
+
     private function sync(RecordingLogger $logger): SyncTimetable
     {
         $departures = $this->departures;
-        $http = new MockHttpClient(static function (string $method, string $url) use ($departures): MockResponse {
-            $body = str_contains($url, 'originAirport=odpt.Airport:TKN') ? $departures : self::body(Direction::Arrival);
+        $arrivals = $this->arrivals;
+        $http = new MockHttpClient(static function (string $method, string $url) use ($departures, $arrivals): MockResponse {
+            $body = str_contains($url, 'originAirport=odpt.Airport:TKN') ? $departures : $arrivals;
 
             return new MockResponse(json_encode($body, \JSON_THROW_ON_ERROR));
         });

@@ -535,6 +535,89 @@ final class SyncTimetableTest extends TestCase
         self::assertTrue($this->logger->has('error', 'Timetable save failed', 'departure'));
     }
 
+    public function testManuallyWithdrawnDirectionStaysWithdrawnAndOnlyLogsTheChange(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $version = $this->setGate();
+        $this->gate->withdraw($version, Direction::Departure, WithdrawalCause::Manual, 'test', $this->clock->now());
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:59:58Z', validTo: '2027-03-31'));
+
+        $this->sync()->execute();
+
+        self::assertSame([Direction::Departure], $this->gate->findCurrentState()?->withdrawn);
+        self::assertCount(1, $this->gate->withdrawals);
+        self::assertSame(WithdrawalCause::Manual, $this->gate->withdrawals[0]['cause']);
+        self::assertFalse($this->logger->has('warning', 'withdrawn from publication'));
+        self::assertFalse($this->logger->has('notice', 'outside the compared period'));
+        self::assertTrue($this->logger->has('notice', 'changed since the previous fetch (withdrawn from publication)', 'departure'));
+    }
+
+    public function testManuallyWithdrawnDirectionStaysWithdrawnWithUnchangedData(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $version = $this->setGate();
+        $this->gate->withdraw($version, Direction::Arrival, WithdrawalCause::Manual, 'test', $this->clock->now());
+        $this->respondBoth('2026-11-12T02:59:58Z');
+
+        $this->sync()->execute();
+
+        self::assertSame([Direction::Arrival], $this->gate->findCurrentState()?->withdrawn);
+        self::assertFalse($this->logger->has('notice', 'changed'));
+    }
+
+    public function testChangedDataDateAloneKeepsTheComparedPeriodPublished(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $this->setGate();
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:59:58Z', dataDate: '2026-11-10T13:00:00+09:00'));
+
+        $this->sync()->execute();
+
+        self::assertSame([], $this->gate->withdrawals);
+        self::assertTrue($this->logger->has('notice', 'dc:date changed', 'departure'));
+        self::assertFalse($this->logger->has('notice', 'outside the compared period'));
+        self::assertFalse($this->logger->has('warning', 'withdrawn'));
+    }
+
+    public function testAddedPeriodAfterTheComparedOneIsAChangeOutside(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $this->setGate();
+        $this->respondBoth('2026-11-12T02:59:58Z');
+        $this->provider->respond(Direction::Departure, self::fetched(Direction::Departure, '2026-11-12T02:59:58Z', entries: [
+            self::entry('ZZ1001', '09:00'),
+            self::entry('ZZ1001', '09:10', validTo: '2027-03-31', validFrom: '2027-01-05'),
+        ]));
+
+        $this->sync()->execute();
+
+        self::assertSame([], $this->gate->withdrawals);
+        self::assertTrue($this->logger->has('notice', 'outside the compared period (b)', 'departure'));
+    }
+
+    public function testVersionSetBetweenTheTwoDirectionsIsTheOneTheSecondIsComparedWith(): void
+    {
+        $this->storeBoth('2026-11-12T02:00:00Z');
+        $first = $this->setGate();
+        $saves = 0;
+        // E.g. the gate command ran while the lock was free between the directions.
+        $this->repository->beforeJudgment(function () use (&$saves, $first): void {
+            if (2 === ++$saves) {
+                $settings = $this->gate->versions[$first - 1]->settings;
+                $this->gate->addVersion(new TimetableGateSettings($settings->period, $settings->comparedOn, $settings->recordCommit, $settings->departureDataDate, $settings->arrivalDataDate, $settings->departureHash, str_repeat('0', 64)), $this->clock->now());
+            }
+        });
+        $this->respondBoth('2026-11-12T02:59:58Z');
+
+        $this->sync()->execute();
+
+        self::assertCount(1, $this->gate->withdrawals);
+        self::assertSame(Direction::Arrival, $this->gate->withdrawals[0]['direction']);
+        self::assertSame($first + 1, $this->gate->withdrawals[0]['version']);
+    }
+
     private function storeBoth(string $requestStartedAt): void
     {
         foreach (Direction::cases() as $direction) {
@@ -587,7 +670,7 @@ final class SyncTimetableTest extends TestCase
         );
     }
 
-    private static function entry(string $flightNumber, string $originTime, Direction $direction = Direction::Departure, string $validTo = '2027-01-04', ?string $note = null): TimetableEntry
+    private static function entry(string $flightNumber, string $originTime, Direction $direction = Direction::Departure, string $validTo = '2027-01-04', ?string $note = null, string $validFrom = '2026-10-25'): TimetableEntry
     {
         [$origin, $destination] = Direction::Departure === $direction ? ['TKN', 'ZZZ'] : ['ZZZ', 'TKN'];
 
@@ -600,7 +683,7 @@ final class SyncTimetableTest extends TestCase
             '23:00',
             null,
             null,
-            ServiceDate::fromString('2026-10-25'),
+            ServiceDate::fromString($validFrom),
             ServiceDate::fromString($validTo),
             $note,
             'odpt.Operator:ZZ',

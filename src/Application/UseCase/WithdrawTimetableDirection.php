@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Application\UseCase;
 
+use App\Application\Gate\TimetableGateInputInvalid;
 use App\Application\Gate\WithdrawalCause;
 use App\Application\Port\TimetableGateRepositoryInterface;
 use App\Application\Port\TimetableLockInterface;
@@ -27,14 +28,16 @@ final readonly class WithdrawTimetableDirection
     }
 
     /**
-     * @throws \InvalidArgumentException                      when the reason is blank
+     * @param string $reason stored with its surrounding white space trimmed
+     *
+     * @throws TimetableGateInputInvalid                      when the reason is blank
      * @throws \App\Application\Port\TimetableLockUnavailable when a sync or another command holds the lock
      */
     public function execute(Direction $direction, string $reason): WithdrawalOutcome
     {
         $reason = trim($reason);
         if ('' === $reason) {
-            throw new \InvalidArgumentException('A reason is required.');
+            throw new TimetableGateInputInvalid('A reason is required.');
         }
 
         return $this->lock->runExclusively(fn (): WithdrawalOutcome => $this->gate->transactional(function () use ($direction, $reason): WithdrawalOutcome {

@@ -30,7 +30,7 @@ final readonly class TimetableGateRequest
     }
 
     /**
-     * @throws \InvalidArgumentException naming the first input that is missing or malformed
+     * @throws TimetableGateInputInvalid naming the first input that is missing or malformed
      */
     public static function fromStrings(
         ?string $from,
@@ -43,11 +43,11 @@ final readonly class TimetableGateRequest
         $fromDate = self::date('from', $from);
         $toDate = self::date('to', $to);
         if ($fromDate->compareTo($toDate) > 0) {
-            throw new \InvalidArgumentException('The compared period starts after it ends.');
+            throw new TimetableGateInputInvalid('The compared period starts after it ends.');
         }
 
         if (null === $recordCommit || 1 !== preg_match(self::COMMIT_PATTERN, $recordCommit)) {
-            throw new \InvalidArgumentException('The record commit must be 40 lowercase hexadecimal digits.');
+            throw new TimetableGateInputInvalid('The record commit must be 40 lowercase hexadecimal digits.');
         }
 
         return new self(
@@ -70,13 +70,13 @@ final readonly class TimetableGateRequest
     private static function date(string $name, ?string $value): ServiceDate
     {
         if (null === $value) {
-            throw new \InvalidArgumentException(\sprintf('The %s date is required (Y-m-d).', $name));
+            throw new TimetableGateInputInvalid(\sprintf('The %s date is required (Y-m-d).', $name));
         }
 
         try {
             return ServiceDate::fromString($value);
         } catch (\InvalidArgumentException) {
-            throw new \InvalidArgumentException(\sprintf('The %s date must be a JST calendar day in Y-m-d format.', $name));
+            throw new TimetableGateInputInvalid(\sprintf('The %s date must be a JST calendar day in Y-m-d format.', $name));
         }
     }
 
@@ -84,14 +84,14 @@ final readonly class TimetableGateRequest
     {
         $message = \sprintf('The %s must be a date and time with seconds and a time zone offset, e.g. 2026-08-21T13:00:00+09:00.', $name);
         if (null === $value || 1 !== preg_match(self::DATA_DATE_PATTERN, $value)) {
-            throw new \InvalidArgumentException($message);
+            throw new TimetableGateInputInvalid($message);
         }
 
         $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:sP', $value);
         // The round trip rejects overflowing values such as 02-30 or 25:00.
         $normalised = str_ends_with($value, 'Z') ? substr($value, 0, -1).'+00:00' : $value;
         if (false === $parsed || $parsed->format('Y-m-d\TH:i:sP') !== $normalised) {
-            throw new \InvalidArgumentException($message);
+            throw new TimetableGateInputInvalid($message);
         }
 
         return $parsed;

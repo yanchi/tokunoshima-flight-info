@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Command;
 
 use App\Application\Gate\ComparedItemsHasher;
+use App\Application\Gate\WithdrawalCause;
 use App\Application\Port\TimetableGateRepositoryInterface;
 use App\Application\Port\TimetableRepositoryInterface;
 use App\Domain\Flight\Direction;
@@ -126,6 +127,21 @@ final class TimetableGateCommandTest extends KernelTestCase
         self::assertSame(Command::FAILURE, $this->tester->execute(['action' => 'withdraw', '--direction' => 'arrival']));
         self::assertSame(Command::FAILURE, $this->tester->execute(['action' => 'withdraw', '--direction' => 'arrival', '--reason' => '  ']));
         self::assertSame([], $this->gate->findCurrentState()?->withdrawn);
+    }
+
+    public function testRefusedSetKeepsTheWithdrawal(): void
+    {
+        $this->tester->execute(self::setInput());
+        $state = $this->gate->findCurrentState();
+        self::assertNotNull($state);
+        $this->gate->withdraw($state->version->id, Direction::Departure, WithdrawalCause::ComparedItemsChanged, null, new \DateTimeImmutable());
+
+        self::assertSame(Command::FAILURE, $this->tester->execute(self::setInput(['--departure-data-date' => '2026-08-21T13:00:01+09:00'])));
+        self::assertSame(Command::FAILURE, $this->tester->execute(self::setInput(['--record-commit' => strtoupper(self::COMMIT)])));
+
+        $after = $this->gate->findCurrentState();
+        self::assertSame($state->version->id, $after?->version->id);
+        self::assertSame([Direction::Departure], $after->withdrawn);
     }
 
     public function testUnknownActionFails(): void

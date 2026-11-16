@@ -270,7 +270,7 @@ final readonly class SyncTimetable
             $this->logger->notice('Timetable content changed since the previous fetch (no compared period is set).', $context);
         } elseif ('unchanged' === $gate['result']) {
             // Unchanged inside the compared period, so the change is outside it (b).
-            $this->logger->notice('Timetable changed outside the compared period (b); it stays published, the change is not.', $context + [
+            $this->logger->notice('Timetable changed outside the compared period (b); the compared period is not withdrawn.', $context + [
                 'gate_version' => $gate['state']->version->id,
             ]);
         } elseif ('already_withdrawn' === $gate['result']) {
