@@ -5,7 +5,7 @@
 {% set weekdays = ['日', '月', '火', '水', '木', '金', '土'] %}
 {% set official_sentence = include('_official_status_sentence.html.twig')|trim %}
 {% set time_heading = is_departure ? '出発予定' : '到着予定' %}
-{% set state = board.state.name %}
+{% set states = enum('App\\Application\\DTO\\BoardState') %}
 
 {% block title %}本日の{{ is_departure ? '出発便' : '到着便' }} | {{ parent() }}{% endblock %}
 
@@ -31,37 +31,37 @@
             <dd>
                 {%- if board.fetchedAt -%}
                     <time datetime="{{ board.fetchedAt|date('c') }}">{{ board.fetchedAt|date('Y年n月j日 H:i') }}</time>（日本時間）
-                {%- elseif state == 'FetchTimeUnknown' -%}
+                {%- elseif board.state is same as(states.FetchTimeUnknown) -%}
                     取得日時を確認できません
-                {%- elseif state == 'ReadFailed' -%}
+                {%- elseif board.state is same as(states.ReadFailed) -%}
                     確認できません
                 {%- else -%}
                     未取得
                 {%- endif -%}
             </dd>
             <dt>取得元</dt>
-            <dd>{{ board.sourceName ?? (state == 'ReadFailed' ? '確認できません' : 'なし') }}</dd>
+            <dd>{{ board.sourceName ?? (board.state is same as(states.ReadFailed) ? '確認できません' : 'なし') }}</dd>
         </dl>
 
-        {% if state == 'NeverFetched' or state == 'ReadFailed' %}
+        {% if board.state is same as(states.NeverFetched) or board.state is same as(states.ReadFailed) %}
             <div class="message message--error" role="status">
                 <p class="message-title">運航情報を取得できません</p>
                 <p>現在、本サイトでは便の情報を表示できません。{{ official_sentence }}</p>
             </div>
-        {% elseif state == 'Suspended' %}
+        {% elseif board.state is same as(states.Suspended) %}
             <div class="message message--error" role="status">
                 <p class="message-title">運航情報を取得できません</p>
                 <p>時刻表を一定期間取得できていないため、表示を停止しています。{{ official_sentence }}</p>
             </div>
-        {% elseif state == 'ThresholdsInvalid' or state == 'FetchTimeUnknown' %}
+        {% elseif board.state is same as(states.ThresholdsInvalid) or board.state is same as(states.FetchTimeUnknown) %}
             {# The fetch may be recent here, so the text does not blame it. #}
             <div class="message message--error" role="status">
                 <p class="message-title">運航情報を取得できません</p>
                 <p>時刻表の表示を停止しています。{{ official_sentence }}</p>
             </div>
-        {% elseif state == 'OutsidePublishedPeriod' %}
+        {% elseif board.state is same as(states.OutsidePublishedPeriod) %}
             <p class="board-empty">本サイトには表示できる便の情報がありません。{{ official_sentence }}</p>
-        {% else %}
+        {% elseif board.published %}
             {% if board.fetchOverdue %}
                 <div class="message message--warning" role="status">
                     <p class="message-title">最終取得から時間が経過しています</p>
@@ -131,6 +131,12 @@
                     </div>
                 </section>
             {% endif %}
+        {% else %}
+            {# A state this template does not know yet: show nothing rather than a wrong list. #}
+            <div class="message message--error" role="status">
+                <p class="message-title">運航情報を取得できません</p>
+                <p>現在、本サイトでは便の情報を表示できません。{{ official_sentence }}</p>
+            </div>
         {% endif %}
     </section>
 {% endblock %}

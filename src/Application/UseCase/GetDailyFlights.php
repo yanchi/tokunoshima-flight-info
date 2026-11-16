@@ -88,7 +88,9 @@ final readonly class GetDailyFlights
 
         $fetchedAt = $timetable->requestStartedAt;
         $freshness = $this->freshnessPolicy->judge($fetchedAt, $now);
-        if (TimetableFreshness::FutureDated === $freshness) {
+        // judge() reports invalid thresholds before a future fetch time; the
+        // board checks the time itself so a future time is never shown (§7 step 7).
+        if ($fetchedAt > $now || TimetableFreshness::FutureDated === $freshness) {
             return $this->board($date, $direction, BoardState::FetchTimeUnknown, null);
         }
         if (TimetableFreshness::InvalidThresholds === $freshness) {

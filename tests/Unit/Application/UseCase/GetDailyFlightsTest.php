@@ -295,6 +295,17 @@ final class GetDailyFlightsTest extends TestCase
         self::assertEquals(new \DateTimeImmutable('2026-11-16T02:00:00Z'), $board->fetchedAt);
     }
 
+    public function testFutureFetchTimeIsHiddenEvenWithInvalidThresholds(): void
+    {
+        $this->storeDeparture('2026-11-16T03:00:01Z', [FictionalTimetable::departure('ZZ1001', Weekday::Monday, '09:00')]);
+        $this->publish();
+
+        $board = $this->useCase(new TimetableFreshnessPolicy('', '604800'))->execute($this->monday, Direction::Departure);
+
+        self::assertSame(BoardState::FetchTimeUnknown, $board->state);
+        self::assertNull($board->fetchedAt);
+    }
+
     public function testReadFailureShowsAnUnavailableBoardAndIsLogged(): void
     {
         $this->publish();
