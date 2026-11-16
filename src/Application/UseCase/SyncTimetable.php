@@ -7,7 +7,10 @@ namespace App\Application\UseCase;
 use App\Application\DTO\TimetableFetchResult;
 use App\Application\Gate\ComparedItemsHasher;
 use App\Application\Gate\ComparedPeriod;
+use App\Application\Gate\TimetableGateState;
+use App\Application\Gate\WithdrawalCause;
 use App\Application\Port\TimetableFetchFailed;
+use App\Application\Port\TimetableGateRepositoryInterface;
 use App\Application\Port\TimetableLockInterface;
 use App\Application\Port\TimetableLockUnavailable;
 use App\Application\Port\TimetableProviderInterface;
@@ -27,10 +30,11 @@ use Psr\Log\LoggerInterface;
  * and mapped outside the lock and saved inside it, so a slow API never
  * holds the lock.
  *
- * The comparison with the previous fetch runs inside the save transaction
- * (§7 step 7 「同期のトランザクション」); comparison (a) and the released state
- * will be added there with the gate settings. Until then nothing is
- * published from here, and a content change is only logged.
+ * Comparison (a) with the gate settings in force, the withdrawal it
+ * leads to, and the comparison with the previous fetch for (b) run inside
+ * the save transaction (§7 step 7 「同期のトランザクション」), so a failure
+ * there keeps the previous timetable. They are logged only after the
+ * commit. The sync never sets a version nor clears a withdrawal.
  *
  * Log lines carry directions, times, counts, exception classes, the fixed
  * failure reasons of the provider and its rate limit counts: never
@@ -45,6 +49,7 @@ final readonly class SyncTimetable
         private ClockInterface $clock,
         private TimetableFreshnessPolicy $freshnessPolicy,
         private ComparedItemsHasher $hasher,
+        private TimetableGateRepositoryInterface $gate,
         private LoggerInterface $logger,
     ) {
     }
@@ -77,13 +82,15 @@ final readonly class SyncTimetable
             }
 
             $changes = [];
+            $gate = null;
             try {
-                // Not an arrow function: it would capture $changes by value,
-                // and the comparison result would never reach this scope.
-                $saved = $this->lock->runExclusively(function () use ($fetched, &$changes): TimetableSaveResult {
+                // Not an arrow function: it would capture $changes and $gate by
+                // value, and the comparison result would never reach this scope.
+                $saved = $this->lock->runExclusively(function () use ($fetched, &$changes, &$gate): TimetableSaveResult {
                     return $this->repository->save(
                         $fetched,
-                        function (?TimetableFetchResult $previous) use ($fetched, &$changes): void {
+                        function (?TimetableFetchResult $previous) use ($fetched, &$changes, &$gate): void {
+                            $gate = $this->applyGate($fetched);
                             $changes = null === $previous ? [] : $this->changesSince($previous, $fetched);
                         },
                     );
@@ -126,8 +133,11 @@ final readonly class SyncTimetable
                     break;
             }
 
-            if ($saved->outcome->replaced() && null !== $saved->previous) {
-                $this->logChanges($changes, $saved->previous, $fetched, $context);
+            if ($saved->outcome->replaced()) {
+                $this->logGate($gate, $context);
+                if (null !== $saved->previous) {
+                    $this->logChanges($changes, $gate, $saved->previous, $fetched, $context);
+                }
             }
         }
 
@@ -161,6 +171,55 @@ final readonly class SyncTimetable
     }
 
     /**
+     * Comparison (a) against the version in force, run before the commit.
+     * A change inside the compared period withdraws the direction from that
+     * version, which only a new version clears (§7 step 7). The withdrawal
+     * names the version compared with, so it can never stick to a newer one.
+     *
+     * @return ?array{state: TimetableGateState, result: 'withdrawn'|'already_withdrawn'|'unchanged'}
+     *                                                                                                null when no version is set
+     *
+     * @throws \JsonException
+     */
+    private function applyGate(TimetableFetchResult $fetched): ?array
+    {
+        $state = $this->gate->findCurrentState();
+        if (null === $state) {
+            return null;
+        }
+
+        // Already out (by (a) or by hand): it stays out whatever comes in.
+        if ($state->isWithdrawn($fetched->direction)) {
+            return ['state' => $state, 'result' => 'already_withdrawn'];
+        }
+
+        $settings = $state->version->settings;
+        $changed = $this->hasher->hash($settings->period, $fetched->entries) !== $settings->hashFor($fetched->direction);
+        if (!$changed) {
+            return ['state' => $state, 'result' => 'unchanged'];
+        }
+
+        $withdrawn = $this->gate->withdraw($state->version->id, $fetched->direction, WithdrawalCause::ComparedItemsChanged, $this->clock->now());
+
+        return ['state' => $state, 'result' => $withdrawn ? 'withdrawn' : 'already_withdrawn'];
+    }
+
+    /**
+     * @param ?array{state: TimetableGateState, result: 'withdrawn'|'already_withdrawn'|'unchanged'} $gate
+     * @param array<string, mixed>                                                                   $context
+     */
+    private function logGate(?array $gate, array $context): void
+    {
+        if (null === $gate || 'withdrawn' !== $gate['result']) {
+            return;
+        }
+
+        $this->logger->warning('Timetable withdrawn from publication: the compared items inside the compared period changed (a). Compare with the official timetable again and set a new version.', $context + [
+            'gate_version' => $gate['state']->version->id,
+        ]);
+    }
+
+    /**
      * What changed against the replaced fetch. Content is compared by
      * hashing both over a period that holds every entry of either whole,
      * with the same hasher as the gate, so nothing is cut away (§7 step 7,
@@ -190,10 +249,11 @@ final readonly class SyncTimetable
     /**
      * Logged only after the save has been committed.
      *
-     * @param list<'data_date'|'content'> $changes
-     * @param array<string, mixed>        $context
+     * @param list<'data_date'|'content'>                                                            $changes
+     * @param ?array{state: TimetableGateState, result: 'withdrawn'|'already_withdrawn'|'unchanged'} $gate
+     * @param array<string, mixed>                                                                   $context
      */
-    private function logChanges(array $changes, TimetableFetchResult $previous, TimetableFetchResult $current, array $context): void
+    private function logChanges(array $changes, ?array $gate, TimetableFetchResult $previous, TimetableFetchResult $current, array $context): void
     {
         if (\in_array('data_date', $changes, true)) {
             $this->logger->notice('Timetable dc:date changed; compare with the official timetable again.', $context + [
@@ -201,10 +261,25 @@ final readonly class SyncTimetable
                 'data_date' => self::format($current->latestDataDate),
             ]);
         }
-        if (\in_array('content', $changes, true)) {
-            // Without gate settings, (a) and (b) cannot be told apart yet.
-            $this->logger->notice('Timetable content changed since the previous fetch (no compared period is set).', $context);
+        if (!\in_array('content', $changes, true)) {
+            return;
         }
+
+        if (null === $gate) {
+            // Without gate settings, (a) and (b) cannot be told apart.
+            $this->logger->notice('Timetable content changed since the previous fetch (no compared period is set).', $context);
+        } elseif ('unchanged' === $gate['result']) {
+            // Unchanged inside the compared period, so the change is outside it (b).
+            $this->logger->notice('Timetable changed outside the compared period (b); the compared period is not withdrawn.', $context + [
+                'gate_version' => $gate['state']->version->id,
+            ]);
+        } elseif ('already_withdrawn' === $gate['result']) {
+            // Where it changed is not judged: the direction is not published anyway.
+            $this->logger->notice('Timetable content changed since the previous fetch (withdrawn from publication).', $context + [
+                'gate_version' => $gate['state']->version->id,
+            ]);
+        }
+        // Newly withdrawn: (a) takes precedence and has been logged.
     }
 
     /**

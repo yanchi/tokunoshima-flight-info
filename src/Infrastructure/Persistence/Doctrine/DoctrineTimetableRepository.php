@@ -96,8 +96,15 @@ final readonly class DoctrineTimetableRepository implements TimetableRepositoryI
     public function findLatest(Direction $direction): ?TimetableFetchResult
     {
         $record = $this->entityManager->find(TimetableFetchRecord::class, $direction);
+        if (null === $record) {
+            return null;
+        }
+        // An already managed record may be older than another process's save,
+        // while the flights are always read fresh. Re-read it, so the gate
+        // command's dc:date check and hashes see the same fetch.
+        $this->entityManager->refresh($record);
 
-        return null === $record ? null : $this->toResult($record);
+        return $this->toResult($record);
     }
 
     private function toResult(TimetableFetchRecord $record): TimetableFetchResult

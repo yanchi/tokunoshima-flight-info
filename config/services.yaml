@@ -103,3 +103,6 @@ when@test:
         test.timetable_repository:
             alias: App\Application\Port\TimetableRepositoryInterface
             public: true
+        test.timetable_gate_repository:
+            alias: App\Application\Port\TimetableGateRepositoryInterface
+            public: true
