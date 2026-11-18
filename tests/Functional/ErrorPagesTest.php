@@ -8,6 +8,7 @@ use App\Tests\Support\ResetsDatabaseSchema;
 use Monolog\Handler\TestHandler;
 use Monolog\Level;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Psr\Clock\ClockInterface;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\DomCrawler\Crawler;
@@ -94,6 +95,43 @@ final class ErrorPagesTest extends WebTestCase
         self::assertStringNotContainsString('secret detail', $error->getAsString());
         self::assertStringNotContainsString('RuntimeException', $error->getAsString());
         self::assertStringNotContainsString('Foo.php', $error->getAsString());
+    }
+
+    /**
+     * The production path: an exception in a controller's service goes through
+     * ErrorListener and the error controller sub-request, and is logged at
+     * critical. A second exception while the error page renders would show
+     * Symfony's English fallback instead, which this catches.
+     */
+    public function testUncaughtExceptionShowsTheServerErrorPageAndIsLoggedAsCritical(): void
+    {
+        $container = static::getContainer();
+        $container->set(ClockInterface::class, new class implements ClockInterface {
+            public function now(): \DateTimeImmutable
+            {
+                throw new \RuntimeException('secret detail /var/app/src/Foo.php');
+            }
+        });
+        $logger = $container->get('monolog.logger.request');
+        $handler = new TestHandler();
+        $logger->pushHandler($handler);
+        $this->client->catchExceptions(true);
+
+        $crawler = $this->client->request('GET', '/');
+
+        self::assertResponseStatusCodeSame(500);
+        self::assertSelectorTextSame('h1', 'ページを表示できません');
+        self::assertSelectorTextSame('.error-code', 'エラーコード：500');
+        $this->assertCommonParts($crawler);
+        $content = (string) $this->client->getResponse()->getContent();
+        self::assertStringNotContainsString('secret detail', $content);
+        self::assertStringNotContainsString('RuntimeException', $content);
+        $uncaught = array_values(array_filter(
+            $handler->getRecords(),
+            static fn ($record): bool => str_starts_with($record->message, 'Uncaught PHP Exception'),
+        ));
+        self::assertCount(1, $uncaught);
+        self::assertSame(Level::Critical, $uncaught[0]->level);
     }
 
     /**
