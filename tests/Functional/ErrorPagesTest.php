@@ -26,6 +26,7 @@ final class ErrorPagesTest extends WebTestCase
 {
     use ResetsDatabaseSchema;
 
+    private const DATE_HINT = '日付を指定した場合は、半角の数字で、年は4けた、月と日は2けたにして、ハイフン（-）でつなげてください（形の例：2026-01-05）。';
     private const OFFICIAL_SENTENCE = '最新の運航状況は、日本航空（JAL）公式サイトでご確認ください。';
 
     private KernelBrowser $client;
@@ -47,11 +48,11 @@ final class ErrorPagesTest extends WebTestCase
      */
     public static function badRequests(): iterable
     {
-        yield 'date with slashes' => ['/flights?date=2026/11/17', 400, '指定が正しくありません', '日付を指定した場合は、半角の数字で「年-月-日」の形'];
-        yield 'date that does not exist' => ['/flights?date=2026-02-30', 400, '指定が正しくありません', '日付を指定した場合は、半角の数字で「年-月-日」の形'];
+        yield 'date with slashes' => ['/flights?date=2026/11/17', 400, '指定が正しくありません', self::DATE_HINT];
+        yield 'date that does not exist' => ['/flights?date=2026-02-30', 400, '指定が正しくありません', self::DATE_HINT];
         yield 'unknown direction on /flights' => ['/flights?direction=north', 400, '指定が正しくありません', 'ページの指定が正しくないため、表示できません。'];
         // The text does not depend on the cause: the date hint shows here too.
-        yield 'unknown direction, date hint' => ['/flights?direction=north', 400, '指定が正しくありません', '日付を指定した場合は、半角の数字で「年-月-日」の形'];
+        yield 'unknown direction, date hint' => ['/flights?direction=north', 400, '指定が正しくありません', self::DATE_HINT];
         yield 'unknown direction on /' => ['/?direction=north', 400, '指定が正しくありません', 'ページの指定が正しくないため、表示できません。'];
         yield 'unknown page' => ['/no-such-page', 404, 'ページが見つかりません', 'URL をご確認ください'];
         yield 'method not allowed' => ['/about', 405, 'ページを表示できません', 'このページは表示できません。'];
@@ -106,6 +107,7 @@ final class ErrorPagesTest extends WebTestCase
     public function testUncaughtExceptionShowsTheServerErrorPageAndIsLoggedAsCritical(): void
     {
         $container = static::getContainer();
+        // Replaces the clock through the public `test.clock` alias (config/services.yaml, when@test).
         $container->set(ClockInterface::class, new class implements ClockInterface {
             public function now(): \DateTimeImmutable
             {
@@ -115,7 +117,6 @@ final class ErrorPagesTest extends WebTestCase
         $logger = $container->get('monolog.logger.request');
         $handler = new TestHandler();
         $logger->pushHandler($handler);
-        $this->client->catchExceptions(true);
 
         $crawler = $this->client->request('GET', '/');
 
@@ -126,12 +127,18 @@ final class ErrorPagesTest extends WebTestCase
         $content = (string) $this->client->getResponse()->getContent();
         self::assertStringNotContainsString('secret detail', $content);
         self::assertStringNotContainsString('RuntimeException', $content);
+        self::assertStringNotContainsString('Foo.php', $content);
+        self::assertStringContainsString('時間をおいて、もう一度お試しください。', $crawler->filter('.error-message')->text());
         $uncaught = array_values(array_filter(
             $handler->getRecords(),
             static fn ($record): bool => str_starts_with($record->message, 'Uncaught PHP Exception'),
         ));
         self::assertCount(1, $uncaught);
         self::assertSame(Level::Critical, $uncaught[0]->level);
+        // Pins the cause, so a 500 from anything else (a template error, say) fails.
+        $exception = $uncaught[0]->context['exception'] ?? null;
+        self::assertInstanceOf(\RuntimeException::class, $exception);
+        self::assertSame('secret detail /var/app/src/Foo.php', $exception->getMessage());
     }
 
     /**
