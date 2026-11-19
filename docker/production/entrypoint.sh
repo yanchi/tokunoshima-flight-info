@@ -4,9 +4,14 @@
 # configuration never starts serving (Issue #6).
 set -eu
 
-# A volume mounted over var/data starts out owned by root.
+# A volume mounted over var/data starts out owned by root. Fix ownership of
+# everything under var/ as root, and drop the old cache: files left by a
+# `docker compose exec` run as root would otherwise make bin/release (www-data)
+# fail, and `restart: unless-stopped` would then loop until the container is
+# recreated.
 mkdir -p var/data var/cache var/log var/share
-chown www-data:www-data var var/data var/cache var/log var/share
+rm -rf var/cache/prod
+chown -R www-data:www-data var
 
 echo "[entrypoint] running bin/release"
 # `su` without `-` keeps the container environment (busybox). bin/release checks

@@ -39,15 +39,24 @@ RUN { \
 # php-fpm swallows the workers' stderr unless told otherwise; the JSON logs
 # (Monolog php://stderr) must reach `docker logs`. The official image already
 # sets clear_env = no, so the container environment reaches PHP.
+#
+# listen: the official image listens on 0.0.0.0:9000, so anything on the same
+# Docker network could send FastCGI directly and bypass the nginx rules (any
+# .php file, PHP_VALUE). Only the nginx in this container needs it. The file
+# name sorts after the image's own zz-docker.conf so that this value wins.
 RUN { \
         echo '[www]'; \
+        echo 'listen = 127.0.0.1:9000'; \
         echo 'catch_workers_output = yes'; \
         echo 'decorate_workers_output = no'; \
-    } > /usr/local/etc/php-fpm.d/zz-app.conf
+    } > /usr/local/etc/php-fpm.d/zzz-app.conf
 
 WORKDIR /var/www/html
 
-COPY --from=vendor --chown=www-data:www-data /app /var/www/html
+# The code stays root-owned: a file-write flaw in PHP must not be able to
+# change it. Only var/ is writable by www-data (below).
+COPY --from=vendor /app /var/www/html
+RUN chmod 755 /var/www/html
 
 # nginx workers run as www-data; the Alpine package creates these directories
 # for the nginx user, and a request body over the buffer size then fails with

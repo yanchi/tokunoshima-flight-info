@@ -8,6 +8,9 @@ on:
   workflow_dispatch:
 
 # PR は新しい push で古い実行を止める。main は止めない
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}

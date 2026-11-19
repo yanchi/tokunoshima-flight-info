@@ -13,6 +13,8 @@ services:
   app:
     image: ${APP_IMAGE:?set APP_IMAGE (an image tag, never latest by accident)}
     restart: unless-stopped
+    # Time for php-fpm and nginx to finish requests in progress on `stop`.
+    stop_grace_period: 30s
     ports:
       - '127.0.0.1:${APP_PORT:-8003}:80'
     environment:

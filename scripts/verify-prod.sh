@@ -72,6 +72,13 @@ compose down -v --remove-orphans >/dev/null 2>&1 || true
 echo '== build'
 docker build -q -f docker/production/Dockerfile -t "$IMAGE" . >/dev/null
 
+echo '== nothing that must stay out of the image is in it'
+leaks="$(docker run --rm --network none --entrypoint sh "$IMAGE" -c \
+    'for p in docs tests .git .claude .agents .codex AGENTS.md CLAUDE.md .env.local .env.local.php .env.production access-token.txt; do [ -e "/var/www/html/$p" ] && echo "$p"; done; true')"
+ok 'no docs/, tests/, .git, .env.local or token file' "$leaks" ''
+ok 'application code is root-owned (not writable by www-data)' \
+    "$(docker run --rm --network none --entrypoint sh "$IMAGE" -c 'stat -c %U /var/www/html/src /var/www/html/vendor /var/www/html/public/index.php /var/www/html/.env | sort -u')" 'root'
+
 echo '== a bad configuration must not start (Issue #6)'
 set +e
 bad_out="$(docker run --rm -e APP_ENV=prod -e APP_DEBUG=0 -e APP_SECRET=x \
@@ -125,8 +132,16 @@ lacks 'no X-Powered-By header' "$headers" 'X-Powered-By'
 lacks 'no nginx version in Server header' "$headers" 'nginx/'
 
 echo '== environment and ownership inside the container'
-ok 'APP_ENV is prod' "$(compose exec -T app printenv APP_ENV)" 'prod'
-ok 'SYMFONY_TRUSTED_PROXIES reaches PHP' "$(compose exec -T app php -r 'echo getenv("SYMFONY_TRUSTED_PROXIES");')" 'REMOTE_ADDR'
+# These two read the environment of the `exec` CLI process. That php-fpm gets the
+# environment too is shown indirectly: /contact answers 200 only when the
+# CONTACT_* settings reach PHP (it answers 503 otherwise). Whether the client
+# address is taken from X-Forwarded-For is not tested here.
+ok 'APP_ENV is prod (CLI environment)' "$(compose exec -T app printenv APP_ENV)" 'prod'
+ok 'php-fpm listens on 127.0.0.1 only, not on all interfaces' \
+    "$(compose exec -T app netstat -ltn | grep -c '0.0.0.0:9000' | tr -d '\r')" '0'
+ok 'php-fpm is listening on 127.0.0.1:9000' \
+    "$(compose exec -T app netstat -ltn | grep -c '127.0.0.1:9000' | tr -d '\r')" '1'
+ok 'SYMFONY_TRUSTED_PROXIES is set (CLI environment)' "$(compose exec -T app php -r 'echo getenv("SYMFONY_TRUSTED_PROXIES");')" 'REMOTE_ADDR'
 ok 'SQLite file is owned by www-data' "$(compose exec -T app stat -c %U /var/www/html/var/data/tkn.db)" 'www-data'
 ok 'migrations created the timetable table' \
     "$(compose exec -T app sqlite3 /var/www/html/var/data/tkn.db "select count(*) from sqlite_master where name='timetable_flight'" | tr -d '\r')" '1'
@@ -135,17 +150,29 @@ ok 'app:check-deploy-config passes' \
 ok 'cron path: sync command exists' \
     "$(compose exec -T -u www-data app php bin/console list app:timetable 2>/dev/null | grep -c 'app:timetable:sync' | tr -d '\r')" '1'
 
-echo '== restart keeps the database and starts again'
-compose exec -T -u www-data app php bin/console dbal:run-sql "select 1" >/dev/null 2>&1 || true
+echo '== the database survives recreating the container'
+compose exec -T -u www-data app sqlite3 /var/www/html/var/data/tkn.db \
+    "create table verify_marker (v text); insert into verify_marker values ('kept')"
+# down WITHOUT -v: the volume stays, the container is created anew
+compose down >/dev/null
+compose up -d >/dev/null
+wait_healthy() {
+    for _ in $(seq 1 40); do
+        if [ "$(docker inspect -f '{{.State.Health.Status}}' "${PROJECT}-app-1" 2>/dev/null || echo none)" = healthy ]; then
+            return 0
+        fi
+        sleep 3
+    done
+    return 1
+}
+ok 'healthy after recreating the container' "$(wait_healthy && echo yes || echo no)" 'yes'
+ok 'the row written before is still there' \
+    "$(compose exec -T app sqlite3 /var/www/html/var/data/tkn.db 'select v from verify_marker' | tr -d '\r')" 'kept'
+
+echo '== root-owned leftovers (a `compose exec` without -u) must not break the next start'
+compose exec -T app sh -c 'mkdir -p var/cache/prod && touch var/cache/prod/root-owned var/log/root-owned.log'
 compose restart app >/dev/null
-healthy=no
-for _ in $(seq 1 40); do
-    if [ "$(docker inspect -f '{{.State.Health.Status}}' "${PROJECT}-app-1" 2>/dev/null || echo none)" = healthy ]; then
-        healthy=yes; break
-    fi
-    sleep 3
-done
-ok 'healthy again after restart (migrate is idempotent)' "$healthy" 'yes'
+ok 'healthy after restart with root-owned files in var/' "$(wait_healthy && echo yes || echo no)" 'yes'
 ok 'GET / after restart' "$(code "$BASE/")" '200'
 
 echo
