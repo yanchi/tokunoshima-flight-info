@@ -22,12 +22,12 @@ php bin/console doctrine:migrations:migrate   # DB（SQLite）のテーブルを
 - 画面は、DB にある最新のゲートの版の照合済みの期間を、そのまま公開する。§7 手順 6 の判定が Go になるまで、本番で `app:timetable:gate set` を実行しない
 - デプロイの前に、本番の `timetable_gate_version` が空か、Go の後に設定した版だけであることを確かめる
 
-ODPT のアクセストークンなどの認証情報は `.env.local` に書く（Git にコミットしない）。`.env` にはコミットしてよい既定値だけを置く。
+ODPT のアクセストークンなどの認証情報は、開発では `.env.local` に書く（Git にコミットしない）。本番は実環境変数だけで渡す（`docs/deploy.md`）。`.env` にはコミットしてよい既定値だけを置く。
 
 | 環境変数 | 内容 |
 | --- | --- |
 | `APP_SECRET` | Symfony のシークレット。値は Git にコミットしない。本番では実環境変数だけで渡す（`docs/deploy.md`） |
-| `ODPT_CONSUMER_KEY` | ODPT のアクセストークン（`.env.local` のみ） |
+| `ODPT_CONSUMER_KEY` | ODPT のアクセストークン（開発は `.env.local` のみ。本番は実環境変数） |
 | `DATABASE_URL` | DB の接続先。既定は環境ごとの SQLite ファイル（`var/data_<環境>.db`）。本番ではファイルを永続化するボリュームに置く（`docs/deploy.md`。本番では必ず設定する） |
 | `CONTACT_RECIPIENT` | 問い合わせフォーム（`/contact`）の受信先メールアドレス（運営者）。どの画面にも出さない。空の間、`/contact` は 503「準備中」を返す。空でよいのは開発・テスト環境だけ |
 | `CONTACT_FROM` | 問い合わせメールの差出人アドレス。さくらのレンタルサーバーでは、SMTP 認証のアドレスと同じにする（未確認）。どの画面にも出さない |

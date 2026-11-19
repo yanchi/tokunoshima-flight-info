@@ -12,15 +12,17 @@
 
 | 環境変数 | 本番での値 | 備考 |
 | --- | --- | --- |
-| `APP_ENV` | `prod` | `bin/release` が設定する |
-| `APP_DEBUG` | `0` | `bin/release` が設定する |
+| `APP_ENV` | `prod` | 実環境変数で必ず設定する（Web・cron・手動コマンドのすべてに効かせる）。Git の `.env` は `dev` なので、外すと dev で動く。`bin/release` は上書きせず、`prod` でなければ失敗する |
+| `APP_DEBUG` | `0` | 同上（`0` でなければ失敗する） |
 | `APP_SECRET` | 本番用の乱数（空は不可） | Git に置かない |
 | `DATABASE_URL` | ボリューム上の SQLite（例：`sqlite:////data/tkn.db`） | 未設定だと `var/` に空のファイルができるので、`bin/release` が拒む |
 | `CONTACT_RECIPIENT` | 運営者の受信先 | どの画面にも出さない |
 | `CONTACT_FROM` | 送信用アドレス | `MAILER_DSN` の認証と同じアドレスにする（さくらで必要かは未確認） |
 | `MAILER_DSN` | `smtp://ユーザー名:パスワード@ホスト:587` | `@` は `%40`、パスワードの記号は URL エンコード。`null://` `native://` は拒まれる |
 | `TIMETABLE_WARN_AFTER_SECONDS` / `TIMETABLE_SUSPEND_AFTER_SECONDS` | 既定（259200 / 604800）のままでよい | `0 < 警告 < 停止 ≤ 604800` を満たすこと |
-| `ODPT_CONSUMER_KEY` | Go の後に設定する | Go の前は設定しない。許諾が終わったら消す（`docs/data-source-verification.md` §2「許諾終了時の削除」） |
+| `SYMFONY_TRUSTED_PROXIES` | 未決定（前段のリバースプロキシの構成を決めるときに確定） | 前段にプロキシを置く場合、設定しないと全員が接続元を1つとして数えられ、`/contact` の送信回数の枠を全員で共有して止まる（`docs/data-source-verification.md` §8「問い合わせフォーム」） |
+| `DEFAULT_URI` / `APP_SHARE_DIR` | `.env` の既定のまま（`http://localhost` / `var/share`）。本番で変える必要があるかは未確認 | |
+| `ODPT_CONSUMER_KEY` | `docs/data-source-verification.md` §7 手順 6 の判定が Go になった後に設定する | それまでは設定しない（キーがない間、同期は失敗として記録される。cron に登録するかは、Go の判定と一緒に決める。未決定）。許諾が終わったら消す（`docs/data-source-verification.md` §2「許諾終了時の削除」） |
 | `LOCK_DSN` | 既定（`flock`）のまま | 1台の前提 |
 
 ## リリースの手順
@@ -29,11 +31,23 @@
 
 `bin/release` がすること（Issue #6）：
 
-1. `DATABASE_URL` が実環境変数にあることを確かめる
+1. `APP_ENV=prod`・`APP_DEBUG=0`・`DATABASE_URL` が実環境変数にあることを確かめる
 2. 古い prod のキャッシュ（`var/cache/prod`）を消す
 3. `app:check-deploy-config`（`APP_SECRET`・問い合わせの3設定・時刻表の閾値の確認）
 4. `doctrine:migrations:migrate`
 5. `cache:warmup`
+
+切り替えの順序（旧コンテナを止めてから migrate するか、cron の同期と重ならないようにするか）と、`bin/release` が失敗したときに利用者からどう見えるか（エントリポイントから呼ぶと起動しないので止まる、デプロイのスクリプトから呼ぶと旧版が残る）は、イメージとデプロイ方式を決めるときに確定する（未決定）。決めるまでは、`bin/release` の間は cron の同期を止めておく。
+
+`bin/release` の実行の条件：
+
+- 公開前（Web サーバーの起動前・切り替え前）にだけ実行する。公開中のコンテナでは実行しない（`var/cache/prod` を消すので、処理中のリクエストが失敗する）。
+- Web サーバー・cron と同じユーザーで実行する。root で実行すると、`var/cache/prod`・`var/share`・新しく作られる SQLite のファイルが root 所有になり、Web や cron が書けなくなる。DB のファイルがあるディレクトリにも、そのユーザーの書き込み権限が要る（SQLite がジャーナルを作るため）。
+
+`bin/release` の前後の運用（未決定。イメージを作るときに確定する）：
+
+- `doctrine:migrations:migrate` は、1件ずつコミットする（`all_or_nothing` は未設定）。途中で中断すると、DB は途中の版のまま残り、`bin/release` は 1 で終わる。実行する前に、SQLite のバックアップを取ることを勧める（書き込み中のファイルの単純なコピーは不整合になるので、`sqlite3 <DB のパス> ".backup <退避先>"` を使う。`sqlite3` コマンドがイメージにあるかは未確認）。
+- 失敗したら、旧コンテナを動かしたままにせず、退避したファイルから戻す。旧イメージに戻したとき、DB に新しいコードにないマイグレーションが残っていても、`migrate` は警告を出すだけで 0 で終わるので、気づけない。戻すときは、DB も同じ時点に戻す。
 
 `bin/release` がしないこと（手で確かめる）：
 
@@ -43,13 +57,26 @@
 
 未確認（実際のイメージで確かめる）：`bin/release` は `sh` で動く。イメージに PHP 8.4 と `ctype`・`iconv`・`pdo_sqlite` があること。本番イメージでの golden test（`ComparedItemsHasherTest`）。マイグレーションを本番の DB に初めて実行するときの、中断条件（`Version20261112045922` は、1日単位でない行があると中断する）。
 
+## 未決定（この手順でもまだ決めていない）
+
+`docs/data-source-verification.md` の次の項目は、デプロイの方式とイメージを決めるときに確定する。
+
+- 本番の同期ログ（stderr）の保存先・保存期間と、許諾の終了時の扱い（§2「許諾終了時の削除」手順 9）
+- ODPT へ要求を送らずに、キーが消えたことを確かめる方法（同 手順 4）。この手順の「`ODPT_CONSUMER_KEY` を消す」は、確かめる方法が決まるまで、確認済みとは言えない
+- 前段のリバースプロキシを置くか
+- 1台のコンテナ・同じコンテナで cron と手動コマンドを実行する前提が崩れたときの、ロックの保存先
+
 ## 公開前の確認
 
-一般に公開する前（`app:timetable:gate set` より前）に、次を済ませる。済むまで公開しない（`docs/data-source-verification.md` 問い合わせフォームの項）。
+一般に公開する前（`app:timetable:gate set` より前）に、次を済ませる。済むまで公開しない（`docs/data-source-verification.md` 問い合わせフォームの項）。この一覧はデプロイに関わるものだけで、公開の可否は同文書 §10「公開前の確認事項」のすべてを満たしてから決める。
 
 - [ ] `bin/release` が、本番と同じ環境変数で成功する
 - [ ] 本番のコンテナから `/contact` で実際に 1 通送り、運営者の受信先に届く（VPS からさくらの 587 番ポートに届くかは未確認）
-- [ ] 本番で 400・404・500 の画面に例外の内容が出ない（500 は `docs/data-source-verification.md` の Issue #34 の項）
+- [ ] 本番で 400・404・405・500 の画面に例外の内容が出ない（500 は `docs/data-source-verification.md` の Issue #34 の項）
+- [ ] 本番の Web が `APP_ENV=prod`・`APP_DEBUG=0` で動いている
+- [ ] 前段にプロキシを置く場合、`SYMFONY_TRUSTED_PROXIES` を設定した（送信回数の枠が全員で1つにならない）
+- [ ] `/contact` の文言を運営者が確認した
+- [ ] 問い合わせの差出人の切り替え（下記）が済んでいる、または時期を運営者が決めた（未決定）
 - [ ] 本番の `timetable_gate_version` が空
 
 ## 問い合わせの差出人を本サイト専用のアドレスにする（Issue #45）
@@ -57,8 +84,8 @@
 開発の間は、isl-mentor と同じさくらのアドレスと認証情報を使い回している（運営者決定、2026-11-19）。兄弟サイトとはデプロイを独立させる方針（CLAUDE.md §1）なので、公開前に切り替える。コードは変えない。
 
 1. さくらのコントロールパネルで、本サイト専用の送信用アドレスを作る。
-2. 本番の `MAILER_DSN` と `CONTACT_FROM` を、そのアドレスと認証情報に差し替える。コンテナに反映するため、作り直すか再起動する。
-3. `bin/release` を実行して成功することを確かめる。
+2. 本番の `MAILER_DSN` と `CONTACT_FROM` を、そのアドレスと認証情報に差し替え、環境変数を変えたコンテナを作り直す（再起動だけでは変わらない実行環境がある）。
+3. 作り直したコンテナは、エントリポイントなどで `bin/release` が実行され、成功して起動していることを確かめる（公開中のコンテナで手で実行しない）。
 4. 本番のコンテナから `/contact` で 1 通送り、受信先に届くことを確かめる。
 5. isl-mentor と認証情報・送信枠を共有していないことを確かめる（isl-mentor 側の `MAILER_DSN` と別のアドレス・パスワードになっている）。
 6. 契約のプランの正確な送信上限を、コントロールパネルで確かめる。`/contact` の送信回数の制限（接続元ごと）は、この上限とは別のものである。

@@ -2,13 +2,20 @@
 # Release step for production: run before the app starts serving (image build
 # cannot do it, because the settings come from the real environment).
 # Stops at the first failure, so a bad configuration never reaches migrate or
-# the web server. See docs/deploy.md.
+# the web server. Run it as the same user as the web server and cron, and
+# never inside a container that is already serving (it deletes var/cache/prod).
+# See docs/deploy.md.
 set -eu
 
 cd "$(dirname "$0")/.."
 
-export APP_ENV=prod
-export APP_DEBUG=0
+# Do not override these: exporting here would only affect this process, so a
+# missing setting would pass the check while the web server and cron run as
+# the .env default (dev). Fail instead.
+if [ "${APP_ENV:-}" != "prod" ] || [ "${APP_DEBUG:-}" != "0" ]; then
+    echo "Set APP_ENV=prod and APP_DEBUG=0 in the environment of the container." >&2
+    exit 1
+fi
 
 # Settings come from the real environment only (docs/deploy.md). A missing
 # DATABASE_URL would silently create an empty SQLite file under var/ (the
