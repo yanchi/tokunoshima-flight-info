@@ -134,7 +134,7 @@ final class BoardTodayTest extends WebTestCase
         $notice = $crawler->filter('.official-notice');
         self::assertStringContainsString(self::OFFICIAL_SENTENCE, $notice->text());
         self::assertStringContainsString('本サイトの表示内容について、航空会社への問い合わせはご遠慮ください。', $notice->text());
-        self::assertStringContainsString('お問い合わせはこちらのフォームまで。', $notice->text());
+        self::assertStringContainsString('お問い合わせはお問い合わせフォームまで。', $notice->text());
         self::assertCount(1, $notice->filter('a[href="/contact"]'));
     }
 

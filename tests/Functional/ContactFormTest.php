@@ -8,7 +8,11 @@ use App\Tests\Support\ResetsDatabaseSchema;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\MailerAssertionsTrait;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
+use Symfony\Component\Mailer\Envelope;
+use Symfony\Component\Mailer\Exception\TransportException;
+use Symfony\Component\Mailer\MailerInterface;
 use Symfony\Component\Mime\Email;
+use Symfony\Component\Mime\RawMessage;
 
 /**
  * Test-only addresses (example.test) and message texts; nothing is sent: the
@@ -176,20 +180,53 @@ final class ContactFormTest extends WebTestCase
 
     public function testMailFailureShowsAnErrorAndKeepsTheInput(): void
     {
-        self::ensureKernelShutdown();
-        // Nothing listens on this port: the connection is refused at once.
-        self::setEnv('MAILER_DSN', 'smtp://127.0.0.1:1');
-        $this->client = static::createClient();
+        $this->client->disableReboot();
+        static::getContainer()->set(MailerInterface::class, new class implements MailerInterface {
+            public function send(RawMessage $message, ?Envelope $envelope = null): void
+            {
+                throw new TransportException('test-only failure');
+            }
+        });
 
-        try {
-            $this->submit('失敗しても残る内容です。', '');
-        } finally {
-            self::setEnv('MAILER_DSN', null);
-        }
+        $this->submit('失敗しても残る内容です。', '');
 
         self::assertResponseStatusCodeSame(503);
         self::assertSelectorTextContains('[role="alert"]', '送信できませんでした。');
         self::assertStringContainsString('失敗しても残る内容です。', (string) $this->client->getResponse()->getContent());
+    }
+
+    public function testReplyToThatTheMailerRefusesIsRejectedNotAServerError(): void
+    {
+        $this->submit('内容です。', 'a..b@example.test');
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSelectorTextContains('main', '返信先のメールアドレスの形式が正しくありません。');
+        self::assertEmailCount(0);
+    }
+
+    public function testOneClientCannotUseUpTheGlobalLimit(): void
+    {
+        $crawler = $this->client->request('GET', '/contact');
+        $form = $crawler->selectButton('送信する')->form(['contact_form[body]' => '', 'contact_form[replyTo]' => '']);
+        // Invalid posts (empty body) over the client limit never reach the global limit.
+        for ($i = 0; $i < 8; ++$i) {
+            $this->client->submit($form);
+        }
+
+        $global = static::getContainer()->get('limiter.contact_form_global')->create('all')->consume(0);
+        self::assertSame(50, $global->getRemainingTokens());
+    }
+
+    public function testPostWhileOnlyTheSenderIsMissingAnswers503AndSendsNothing(): void
+    {
+        self::ensureKernelShutdown();
+        self::setEnv('CONTACT_FROM', '');
+        $client = static::createClient();
+
+        $client->request('POST', '/contact', ['contact_form' => ['body' => '内容です。']]);
+
+        self::assertResponseStatusCodeSame(503);
+        self::assertEmailCount(0);
     }
 
     public function testShowsPendingWhileTheAddressesAreNotConfigured(): void
@@ -211,7 +248,7 @@ final class ContactFormTest extends WebTestCase
         $form = $crawler->selectButton('送信する')->form([
             'contact_form[body]' => $body,
             'contact_form[replyTo]' => $replyTo,
-            'contact_form[website]' => $honeypot,
+            'contact_form[trap]' => $honeypot,
         ]);
         $this->client->submit($form);
     }

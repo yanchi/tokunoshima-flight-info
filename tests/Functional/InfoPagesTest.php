@@ -106,7 +106,7 @@ final class InfoPagesTest extends WebTestCase
     {
         $this->client->request('GET', $path);
 
-        self::assertSelectorTextContains('.official-notice', 'お問い合わせはこちらのフォームまで。');
+        self::assertSelectorTextContains('.official-notice', 'お問い合わせはお問い合わせフォームまで。');
         self::assertSelectorExists('.official-notice a[href="/contact"]');
     }
 

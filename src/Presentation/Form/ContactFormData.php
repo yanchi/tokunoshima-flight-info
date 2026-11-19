@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Presentation\Form;
 
+use App\Infrastructure\Contact\MailAddress;
 use Symfony\Component\Validator\Constraints as Assert;
+use Symfony\Component\Validator\Context\ExecutionContextInterface;
 
 final class ContactFormData
 {
@@ -17,5 +19,13 @@ final class ContactFormData
     public ?string $replyTo = null;
 
     /** Honeypot: people never see this field, so a filled value means a bot. */
-    public ?string $website = null;
+    public ?string $trap = null;
+
+    #[Assert\Callback]
+    public function validateReplyToAcceptedByTheMailer(ExecutionContextInterface $context): void
+    {
+        if (null !== $this->replyTo && '' !== trim($this->replyTo) && !MailAddress::isValid($this->replyTo)) {
+            $context->buildViolation('返信先のメールアドレスの形式が正しくありません。')->atPath('replyTo')->addViolation();
+        }
+    }
 }

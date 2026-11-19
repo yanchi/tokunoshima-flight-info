@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Domain\Flight\TimetableFreshnessPolicy;
+use App\Infrastructure\Contact\MailAddress;
+use App\Infrastructure\Contact\MailerDsnCheck;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -21,12 +23,6 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 #[AsCommand(name: 'app:check-deploy-config', description: 'Fails if a setting required for public release is empty or a placeholder')]
 final class CheckDeployConfigCommand extends Command
 {
-    /**
-     * The mailer DSN schemes that deliver nothing, so a form submitted in
-     * production would be lost.
-     */
-    private const NON_DELIVERING_MAILER_SCHEMES = ['null://', 'null:', 'native://'];
-
     public function __construct(
         #[Autowire('%kernel.environment%')]
         private readonly string $environment,
@@ -59,13 +55,13 @@ final class CheckDeployConfigCommand extends Command
         if ('' === trim($this->appSecret)) {
             $missing[] = 'APP_SECRET';
         }
-        if ('' === trim($this->contactRecipient)) {
+        if (!MailAddress::isValid($this->contactRecipient) || '' === trim($this->contactRecipient)) {
             $missing[] = 'CONTACT_RECIPIENT';
         }
-        if ('' === trim($this->contactFrom)) {
+        if (!MailAddress::isValid($this->contactFrom) || '' === trim($this->contactFrom)) {
             $missing[] = 'CONTACT_FROM';
         }
-        if ('' === trim($this->mailerDsn) || $this->isNonDeliveringMailer($this->mailerDsn)) {
+        if (!MailerDsnCheck::isWellFormed($this->mailerDsn) || !MailerDsnCheck::delivers($this->mailerDsn)) {
             $missing[] = 'MAILER_DSN';
         }
 
@@ -83,17 +79,5 @@ final class CheckDeployConfigCommand extends Command
         $output->writeln('Deploy settings OK.');
 
         return Command::SUCCESS;
-    }
-
-    private function isNonDeliveringMailer(string $dsn): bool
-    {
-        $dsn = strtolower(trim($dsn));
-        foreach (self::NON_DELIVERING_MAILER_SCHEMES as $scheme) {
-            if (str_starts_with($dsn, $scheme)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 }

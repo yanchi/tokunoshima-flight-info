@@ -51,6 +51,10 @@ final class CheckDeployConfigCommandTest extends TestCase
         yield 'dsn empty' => ['test-secret', 'to@example.invalid', 'from@example.invalid', '', 'MAILER_DSN'];
         yield 'dsn null transport' => ['test-secret', 'to@example.invalid', 'from@example.invalid', 'null://null', 'MAILER_DSN'];
         yield 'dsn native transport' => ['test-secret', 'to@example.invalid', 'from@example.invalid', 'native://default', 'MAILER_DSN'];
+        yield 'recipient not an address' => ['test-secret', 'a..b@example.invalid', 'from@example.invalid', 'smtp://u:p@mail.invalid:587', 'CONTACT_RECIPIENT'];
+        yield 'from not an address' => ['test-secret', 'to@example.invalid', 'not-an-address', 'smtp://u:p@mail.invalid:587', 'CONTACT_FROM'];
+        yield 'dsn without host' => ['test-secret', 'to@example.invalid', 'from@example.invalid', 'smtp://', 'MAILER_DSN'];
+        yield 'dsn with a raw hash in the password' => ['test-secret', 'to@example.invalid', 'from@example.invalid', 'smtp://u:pa#ss@mail.invalid:587', 'MAILER_DSN'];
         yield 'all empty' => ['', '', '', '', 'APP_SECRET, CONTACT_RECIPIENT, CONTACT_FROM, MAILER_DSN'];
     }
 

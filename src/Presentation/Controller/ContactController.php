@@ -10,6 +10,7 @@ use App\Presentation\Form\ContactFormData;
 use App\Presentation\Form\ContactFormType;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
@@ -40,11 +41,11 @@ final class ContactController extends AbstractController
             return $this->render('contact/form.html.twig', ['form' => $form, 'state' => 'input']);
         }
 
-        // Every POST counts, valid or not, so that a bot cannot probe for free.
-        $perClient = $this->perClientLimiter->create($request->getClientIp() ?? 'unknown')->consume();
-        $global = $this->globalLimiter->create('all')->consume();
-        if (!$perClient->isAccepted() || !$global->isAccepted()) {
-            return $this->render('contact/form.html.twig', ['form' => $form, 'state' => 'limited'], new Response(status: Response::HTTP_TOO_MANY_REQUESTS));
+        // Every POST counts against the client's own limit, valid or not, so
+        // that a bot cannot probe for free. The global limit is spent only when
+        // a message is about to be sent, so one client cannot use it up.
+        if (!$this->perClientLimiter->create($request->getClientIp() ?? 'unknown')->consume()->isAccepted()) {
+            return $this->limited($form);
         }
 
         if (!$form->isValid()) {
@@ -55,8 +56,12 @@ final class ContactController extends AbstractController
         $data = $form->getData();
 
         // A filled honeypot is a bot: answer as if it worked, and send nothing.
-        if (null !== $data->website && '' !== trim($data->website)) {
+        if (null !== $data->trap && '' !== trim($data->trap)) {
             return $this->redirectToRoute('contact_sent');
+        }
+
+        if (!$this->globalLimiter->create('all')->consume()->isAccepted()) {
+            return $this->limited($form);
         }
 
         try {
@@ -72,5 +77,13 @@ final class ContactController extends AbstractController
     public function sent(): Response
     {
         return $this->render('contact/sent.html.twig');
+    }
+
+    /**
+     * @param FormInterface<ContactFormData> $form
+     */
+    private function limited(FormInterface $form): Response
+    {
+        return $this->render('contact/form.html.twig', ['form' => $form, 'state' => 'limited'], new Response(status: Response::HTTP_TOO_MANY_REQUESTS));
     }
 }

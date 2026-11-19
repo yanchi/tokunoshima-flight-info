@@ -29,11 +29,21 @@ final readonly class MailerContactMessageSender implements ContactMessageSenderI
         private string $recipient,
         #[Autowire(env: 'CONTACT_FROM')]
         private string $from,
+        #[Autowire(env: 'MAILER_DSN')]
+        private string $mailerDsn,
+        #[Autowire('%kernel.environment%')]
+        private string $environment,
     ) {
     }
 
     public function isConfigured(): bool
     {
+        // In production a DSN that delivers nothing would answer "received" and
+        // lose the message, so the form is treated as not available.
+        if ('prod' === $this->environment && !MailerDsnCheck::delivers($this->mailerDsn)) {
+            return false;
+        }
+
         return '' !== trim($this->recipient) && '' !== trim($this->from);
     }
 
@@ -43,18 +53,25 @@ final readonly class MailerContactMessageSender implements ContactMessageSenderI
             throw new ContactMessageNotSent('The contact recipient or sender is not configured.');
         }
 
-        $email = (new Email())
-            ->from(new Address(trim($this->from), '徳之島空港 運航情報'))
-            ->to(new Address(trim($this->recipient)))
-            ->subject(self::SUBJECT)
-            ->text(\sprintf(
-                "受付日時（日本時間）：%s\n返信先：%s\n\n%s\n",
-                $message->receivedAt->setTimezone(new \DateTimeZone('Asia/Tokyo'))->format('Y-m-d H:i'),
-                $message->replyTo ?? '（入力なし）',
-                $message->body,
-            ));
-        if (null !== $message->replyTo) {
-            $email->replyTo(new Address($message->replyTo));
+        try {
+            $email = (new Email())
+                ->from(new Address(trim($this->from), '徳之島空港 運航情報'))
+                ->to(new Address(trim($this->recipient)))
+                ->subject(self::SUBJECT)
+                ->text(\sprintf(
+                    "受付日時（日本時間）：%s\n返信先：%s\n\n%s\n",
+                    $message->receivedAt->setTimezone(new \DateTimeZone('Asia/Tokyo'))->format('Y-m-d H:i'),
+                    $message->replyTo ?? '（入力なし）',
+                    $message->body,
+                ));
+            if (null !== $message->replyTo) {
+                $email->replyTo(new Address($message->replyTo));
+            }
+        } catch (\InvalidArgumentException $e) {
+            // The exception text carries the offending address: log the class only.
+            $this->logger->error('Contact message was not built.', ['exception_class' => $e::class]);
+
+            throw new ContactMessageNotSent('The contact message could not be built.', 0, $e);
         }
 
         try {

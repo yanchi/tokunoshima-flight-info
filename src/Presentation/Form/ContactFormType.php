@@ -19,9 +19,9 @@ final class ContactFormType extends AbstractType
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
         $builder
-            ->add('body', TextareaType::class, ['label' => 'お問い合わせの内容', 'required' => false, 'attr' => ['rows' => 8]])
+            ->add('body', TextareaType::class, ['label' => 'お問い合わせの内容（必須）', 'required' => false, 'attr' => ['rows' => 8]])
             ->add('replyTo', EmailType::class, ['label' => '返信先のメールアドレス（任意）', 'required' => false, 'attr' => ['autocomplete' => 'email']])
-            ->add('website', TextType::class, ['label' => false, 'required' => false, 'attr' => ['tabindex' => '-1', 'autocomplete' => 'off']]);
+            ->add('trap', TextType::class, ['label' => false, 'required' => false, 'attr' => ['tabindex' => '-1', 'autocomplete' => 'off']]);
     }
 
     public function configureOptions(OptionsResolver $resolver): void
