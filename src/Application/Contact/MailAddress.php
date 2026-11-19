@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-namespace App\Infrastructure\Contact;
+namespace App\Application\Contact;
 
 use Symfony\Component\Mime\Address;
 

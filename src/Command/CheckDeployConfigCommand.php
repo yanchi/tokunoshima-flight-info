@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Command;
 
+use App\Application\Contact\MailAddress;
 use App\Domain\Flight\TimetableFreshnessPolicy;
-use App\Infrastructure\Contact\MailAddress;
 use App\Infrastructure\Contact\MailerDsnCheck;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;

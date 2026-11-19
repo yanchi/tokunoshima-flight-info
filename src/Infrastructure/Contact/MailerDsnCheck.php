@@ -23,8 +23,11 @@ final class MailerDsnCheck
     }
 
     /**
-     * True when the DSN has a scheme and a host (so a raw "#" or "@" in the
-     * password, which breaks the parsing, is caught).
+     * True when the DSN parses to a scheme and a host. A raw "#" or "@" in the
+     * password usually breaks that parsing and is caught, but not always (a
+     * password that starts with digits can parse as a port). Only the single
+     * DSN form "scheme://user:password@host:port" is supported: failover(...)
+     * and roundrobin(...) are not, and are reported as malformed.
      */
     public static function isWellFormed(string $dsn): bool
     {

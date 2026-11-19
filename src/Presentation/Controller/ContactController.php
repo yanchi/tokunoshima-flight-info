@@ -43,7 +43,9 @@ final class ContactController extends AbstractController
 
         // Every POST counts against the client's own limit, valid or not, so
         // that a bot cannot probe for free. The global limit is spent only when
-        // a message is about to be sent, so one client cannot use it up.
+        // a message is about to be sent, so invalid posts and honeypot hits do
+        // not use it up. A client that sends valid messages can still use five
+        // an hour of it (accepted: docs §8 「問い合わせフォーム」).
         if (!$this->perClientLimiter->create($request->getClientIp() ?? 'unknown')->consume()->isAccepted()) {
             return $this->limited($form);
         }

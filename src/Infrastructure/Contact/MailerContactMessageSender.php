@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Infrastructure\Contact;
 
+use App\Application\Contact\MailAddress;
 use App\Application\DTO\ContactMessage;
 use App\Application\Port\ContactMessageNotSent;
 use App\Application\Port\ContactMessageSenderInterface;
@@ -44,7 +45,9 @@ final readonly class MailerContactMessageSender implements ContactMessageSenderI
             return false;
         }
 
-        return '' !== trim($this->recipient) && '' !== trim($this->from);
+        // An address the mailer refuses would fail on every submission.
+        return '' !== trim($this->recipient) && '' !== trim($this->from)
+            && MailAddress::isValid($this->recipient) && MailAddress::isValid($this->from);
     }
 
     public function send(ContactMessage $message): void

@@ -123,6 +123,8 @@ final class ContactFormTest extends WebTestCase
         $this->submit('内容です。', 'not-an-address');
 
         self::assertResponseStatusCodeSame(422);
+        // One message, not one per check.
+        self::assertSame(1, substr_count((string) $this->client->getResponse()->getContent(), '返信先のメールアドレスの形式が正しくありません。'));
         self::assertSelectorTextContains('main', '返信先のメールアドレスの形式が正しくありません。');
         self::assertStringContainsString('内容です。', (string) $this->client->getResponse()->getContent());
         self::assertEmailCount(0);

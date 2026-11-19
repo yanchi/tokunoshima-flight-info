@@ -27,6 +27,8 @@ final class MailerContactMessageSenderTest extends TestCase
         self::assertTrue($this->sender()->isConfigured());
         self::assertFalse($this->sender(recipient: '')->isConfigured());
         self::assertFalse($this->sender(from: ' ')->isConfigured());
+        self::assertFalse($this->sender(recipient: 'not-an-address')->isConfigured());
+        self::assertFalse($this->sender(from: 'a..b@example.test')->isConfigured());
     }
 
     public function testInProductionANonDeliveringDsnMakesItUnavailable(): void
