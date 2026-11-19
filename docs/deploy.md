@@ -23,7 +23,7 @@
 ## 決まっていること・この手順の前提
 
 - 設定は実環境変数だけで渡す（運営者決定、2026-11-19）。`.env.local`・`.env.prod.local`・`.env.local.php`（`composer dump-env`）はイメージに含めない。Git の `.env`（既定値だけ）は含まれる。
-- 本番のコンテナは1台。cron の同期と、運営者が手で実行するコマンド（`app:timetable:gate`・`app:timetable:purge`）は、同じコンテナの中で `docker compose exec` で実行する（ロックが `LOCK_DSN=flock` のファイルで、コンテナの外とは共有できないため。`docs/data-source-verification.md` §7 手順 7）。コンテナの中で cron のデーモンは動かさず、VPS の cron から `exec` する。
+- 本番のコンテナは1台。cron の同期と、運営者が手で実行するコマンド（`app:timetable:gate`・`app:timetable:purge`）は、同じコンテナの中で `docker compose exec` で実行する（ロックが `LOCK_DSN=flock` のファイルで、コンテナの外とは共有できないため。`docs/data-source-verification.md` §7 手順 7）。コンテナの中で cron のデーモンは動かさず、VPS の cron から `exec` する。**「1台」「cron は `docker compose exec`」は、私が決めた前提で、運営者に未確認。**
 - ほかのサービスと同じ VPS に同居する可能性があるので、ホスト nginx の 80/443 には手を付けず、このサイトは `127.0.0.1` の空きポートだけを使う。**VPS の構成、DOMAIN、ポートは運営者に未確認。**
 - 今は本番のみで、ステージングは作らない（運営者決定、2026-11-19）。
 - 自動デプロイ（GitHub Actions から SSH）は作らない。CI は、全 PR でスモークテスト、`main` で GHCR へのイメージの push（コミット SHA のタグ）までを行う。VPS への反映は手で行う（次の PR で自動化するかは未決定）。
@@ -47,9 +47,8 @@
 
 ## 初回の準備（VPS で1回だけ）
 
-1. DNS：DOMAIN の A レコードを VPS に向ける。
-2. 空きポートの確認：`sudo ss -ltnp | grep ':8003 ' || echo 空いている`（8003 は例）。使われていれば、`APP_PORT` と vhost の `proxy_pass` を同じ別のポートにする。
-3. ディレクトリと設定：
+1. 空きポートの確認：`sudo ss -ltnp | grep ':8003 ' || echo 空いている`（8003 は例）。使われていれば、`APP_PORT` と vhost の `proxy_pass` を同じ別のポートにする。
+2. ディレクトリと設定：
 
    ```bash
    sudo mkdir -p /opt/tokunoshima-flight-info
@@ -61,17 +60,18 @@
    chmod 600 .env.production        # 値を入れる。コミットしない
    ```
 
-4. ホスト nginx の vhost：
+3. イメージの取得：`main` の CI が GHCR に push したイメージを pull する。パッケージは最初は private。**どちらにするかは未決定**（推奨：イメージには公開リポジトリのコードだけが入り、秘密も ODPT のデータも入らない（`.dockerignore`）ので、パッケージを public にして VPS に認証情報を置かない。private のままなら、VPS で `docker login ghcr.io` する読み取り専用のトークンが要る）。
+4. 起動：`docker compose -f compose.prod.yml --env-file .env.production up -d --wait`。entrypoint が `bin/release` を実行し、失敗するとコンテナは止まる（`restart: unless-stopped` なので再起動を繰り返す。`docker compose logs app` で原因を見る）。この時点では、VPS 自身から `curl http://127.0.0.1:<APP_PORT>/about` で見られるだけで、外からは見えない。
+5. 「Phase 1 MVP を一般に公開する前」の確認（下記）のうち、127.0.0.1 で確かめられるものを済ませる。
+6. **公開する手順（確認が済んだ後に行う）**：DNS の A レコードを VPS に向け、ホスト nginx の vhost を入れて certbot を実行する。この時点で、サイトはインターネットから見える。HTTPS 経由でしか確かめられない項目（下記）は、この後でないと確かめられない。その間の外からのアクセスをどう扱うか（運営者の接続元だけを vhost で許可する、など）は**未決定**。
 
    ```bash
+   # DNS の反映後
    sudo cp deploy/nginx/tokunoshima-flight-info.conf /etc/nginx/sites-enabled/
    sudo sed -i 's/DOMAIN/<実ドメイン>/' /etc/nginx/sites-enabled/tokunoshima-flight-info.conf
    sudo nginx -t && sudo systemctl reload nginx
    sudo certbot --nginx -d <実ドメイン>
    ```
-
-5. イメージの取得：`main` の CI が GHCR に push したイメージを pull する。パッケージは最初は private。**どちらにするかは未決定**（推奨：イメージには公開リポジトリのコードだけが入り、秘密も ODPT のデータも入らない（`.dockerignore`）ので、パッケージを public にして VPS に認証情報を置かない。private のままなら、VPS で `docker login ghcr.io` する読み取り専用のトークンが要る）。
-6. 起動：`docker compose -f compose.prod.yml --env-file .env.production up -d`。entrypoint が `bin/release` を実行し、失敗するとコンテナは止まる（`restart: unless-stopped` なので再起動を繰り返す。`docker compose logs app` で原因を見る）。
 
 ## リリース（デプロイ）の手順
 
@@ -83,18 +83,18 @@
    cd /opt/tokunoshima-flight-info
    dc() { docker compose -f compose.prod.yml --env-file .env.production "$@"; }
    dc exec -T app sqlite3 /var/www/html/var/data/tkn.db ".backup /tmp/tkn-backup.db"
-   mkdir -p backups && dc cp app:/tmp/tkn-backup.db "backups/tkn-$(date +%Y%m%d-%H%M%S).db"
+   mkdir -p backups && chmod 700 backups && dc cp app:/tmp/tkn-backup.db "backups/tkn-$(date +%Y%m%d-%H%M%S).db"
    dc exec -T app rm /tmp/tkn-backup.db
    ```
 
    バックアップには ODPT 由来の時刻表が入る。ODPT が許諾した DB の保存は「時刻表は次の取得まで」（`docs/data-source-verification.md` §9 M1）なので、**バックアップを残す期間は未決定**（事務局には確認していない）。決めるまでは、リリースが成功して手順 4 の確認が済んだら、そのバックアップを消す。許諾が終わったときは、`backups/` も削除の対象（同文書 §2「許諾終了時の削除」手順 7）。
 
-2. cron の同期を止める（crontab の行をコメントアウト）。切り替えで動いている同期が切れないようにするため。**許諾が終わった後のデプロイ（`docs/data-source-verification.md` §2「許諾終了時の削除」手順 8）では、手順 5 で cron を戻さない。**
+2. cron の同期を止める（crontab の行をコメントアウト）。そのあと、動いている同期が終わるのを待つ（`flock /tmp/tkn-sync.lock true`。cron と同じロックのファイルで、同期1回は最悪で約 240 秒）。待たずに切り替えると、同期はコンテナの停止（30 秒後に強制終了）で途中で切れる。**許諾が終わった後のデプロイ（`docs/data-source-verification.md` §2「許諾終了時の削除」手順 8）では、手順 5 で cron を戻さない。**
 3. `.env.production` の `APP_IMAGE` を新しい SHA に書き換え、`dc pull && dc up -d --wait`（healthy にならなければ 0 以外で返る）。コンテナが作り直され、entrypoint が `bin/release`（設定の確認 → migrate → キャッシュ）を実行する。公開中のコンテナで `bin/release` を手で実行しない（`var/cache/prod` を消すため）。
 4. `dc ps` で healthy を確認し、`dc logs --tail=50 app` にエラーがないことを見る。
 5. cron を戻す（許諾が終わった後は戻さない。`docs/data-source-verification.md` §2 手順 8 のとおり、cron に `app:timetable:sync` がないこと、キーがないことを確かめる）。
 
-失敗したとき（`bin/release` が止まる、起動しない）：旧コンテナは、すでに置き換わっている。利用者には、ホスト nginx の 502 の画面が見える（このサイトは止まる。「更新停止／要公式確認」の画面ではなく、非公式の旨・公式運航情報の案内（CLAUDE.md §6）・ODPT のクレジットも出ない）。ホスト nginx の `error_page 502 503 504` で静的な日本語の画面を返す案があるが、**採用するかは未決定**。直すか、`APP_IMAGE` を前の SHA に戻して `dc up -d` する。migrate が途中で止まっていたら、旧イメージに戻す前に、手順 1 のバックアップを戻す（`dc down` してから、ボリューム上の `tkn.db` を置き換える。`-v` は付けない）。purge より前のバックアップを戻すと、ODPT のデータが DB に戻る（許諾が終わった後は戻さない）。旧イメージに戻したとき、DB に新しいコードにないマイグレーションが残っていても、`migrate` は警告を出すだけで 0 で終わるので、気づけない。戻すときは、DB も同じ時点に戻す。
+失敗したとき（`bin/release` が止まる、起動しない。nginx や php-fpm が起動に失敗し続けた場合も、コンテナが終了して再起動される）：旧コンテナは、すでに置き換わっている。利用者には、ホスト nginx の 502 の画面が見える（このサイトは止まる。「更新停止／要公式確認」の画面ではなく、非公式の旨・公式運航情報の案内（CLAUDE.md §6）・ODPT のクレジットも出ない）。ホスト nginx の `error_page 502 503 504` で静的な日本語の画面を返す案があるが、**採用するかは未決定**。直すか、`APP_IMAGE` を前の SHA に戻して `dc up -d` する。migrate が途中で止まっていたら、旧イメージに戻す前に、手順 1 のバックアップを戻す。`dc down`（`-v` は付けない）で止め、バックアップをボリュームに書き戻す：`docker run --rm -v tokunoshima-flight-info_tkn-data:/data -v "$PWD/backups:/b:ro" alpine sh -c 'cp /b/<ファイル名> /data/tkn.db && chown 82:82 /data/tkn.db && rm -f /data/tkn.db-wal /data/tkn.db-shm /data/tkn.db-journal'`（ボリューム名は `docker volume ls` で確かめる。www-data の uid/gid 82 は Alpine のもの。**この手順は本番で試していない**）。purge より前のバックアップを戻すと、ODPT のデータが DB に戻る（許諾が終わった後は戻さない）。旧イメージに戻したとき、DB に新しいコードにないマイグレーションが残っていても、`migrate` は警告を出すだけで 0 で終わるので、気づけない。戻すときは、DB も同じ時点に戻す。
 
 **`docker compose down -v` は実行しない。** ボリューム（DB）が消える。
 
@@ -126,8 +126,9 @@ VPS の cron から、起動中のコンテナの中で実行する：
 
 - [ ] 本番のコンテナが、本番と同じ環境変数で healthy になっている
 - [ ] 本番のコンテナから `/contact` で実際に 1 通送り、運営者の受信先に届く（VPS からさくらの 587 番ポートに届くかは未確認）
-- [ ] 本番で 400・404・405・500 の画面に例外の内容が出ない（500 は `docs/data-source-verification.md` の Issue #34 の項）
-- [ ] ホスト nginx 経由で、HTTPS で表示され、`/contact` の送信回数の枠が利用者ごとに分かれる（接続元が区別される）
+- [ ] 本番で 400・404・405・500 の画面に例外の内容が出ず、非公式の旨・公式運航情報の案内文（JAL へのリンク・URL なし）・ODPT のクレジットが出る（500 は `docs/data-source-verification.md` の Issue #34 の項）
+- [ ] ホスト nginx の 502・503・504 の画面の扱いを決めた（`error_page` で静的な日本語の画面を返すか。出さない場合は、案内が出ないことを許容する。未決定）
+- [ ] （DNS・certbot の後でないと確かめられない）ホスト nginx 経由で、HTTPS で表示され、`/contact` の送信回数の枠が利用者ごとに分かれる（接続元が区別される）
 - [ ] `/contact` の文言を運営者が確認した
 - [ ] 問い合わせの差出人の切り替え（下記）が済んでいる、または時期を運営者が決めた（未決定）
 - [ ] マイグレーションを本番の DB に初めて実行するとき、中断条件（`Version20261112045922` は、1日単位でない行があると中断する）に当たらない
@@ -135,7 +136,7 @@ VPS の cron から、起動中のコンテナの中で実行する：
 
 ### 時刻表を公開する前（`app:timetable:gate set` より前）
 
-- [ ] `docs/data-source-verification.md` §7 手順 6 の判定が Go である（公式時刻表との照合）
+- [ ] `docs/data-source-verification.md` §7 手順 6 の判定が Go である（公式時刻表との照合）。**Go の前は、本番に `ODPT_CONSUMER_KEY` を設定しない。** Go の後の順序は、キーを設定してコンテナを作り直す → 同期を実行して時刻表を保存する → `app:timetable:gate set`
 - [ ] 本番イメージで golden test（`ComparedItemsHasherTest`）が通る（イメージには `tests/` を入れていない。CI の PHP 8.4 の実行結果で代える場合は、その旨を決める。未決定）
 - [ ] 同期のログの保存先・保存期間、cron の間隔を決めた（未決定）
 
@@ -147,7 +148,9 @@ VPS の cron から、起動中のコンテナの中で実行する：
 - 同期の間隔、同期ログの保存先・保存期間、同期の終了コードの監視（`docs/data-source-verification.md` §2 手順 9）
 - ODPT へ要求を送らずに、キーが消えたことを確かめる方法（同 手順 4）。「`ODPT_CONSUMER_KEY` を消す」は、確かめる方法が決まるまで、確認済みとは言えない
 - 1台・同じコンテナの前提が崩れたときの、ロックの保存先
-- nginx か php-fpm が起動に失敗し続けても、supervisord は生き続け、コンテナは終了しない（`restart: unless-stopped` は効かない）。`healthy` でなくなったことを知らせる監視は未決定
+- ホスト nginx の 502・503・504 の画面（案内文・非公式の旨・クレジットが出ない）を、静的な日本語の画面にするか
+- `healthy` でなくなったことを知らせる監視（nginx・php-fpm が落ち続けた場合、コンテナは終了して再起動される（`exit-on-fatal`。スモークテストで確認）が、再起動を繰り返す間は 502 が続く）
+- ホスト nginx のホスト名の固定（`trusted_hosts` はアプリ側の設定で、今は未設定）、コンテナのメモリの上限（`mem_limit`。必要な量は未確認）
 - GHCR に push するイメージは、CI のスモークテストで試したビルドとは別のビルド（ベースイメージのタグ `php:8.4.27` と `composer:2.9` は digest で固定していない）。試したイメージそのものを push する形にするかは未決定
 - GHCR のパッケージを public にした場合の、`org.opencontainers.image.source` ラベルでのリポジトリとの紐づけ（未確認）
 - `sh` の `bin/release` と entrypoint が、本番のイメージ（Alpine の busybox）で動くことは、スモークテストで確かめた。VPS 上の実行ユーザーと権限は未確認

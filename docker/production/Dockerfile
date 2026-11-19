@@ -66,7 +66,8 @@ RUN chown -R www-data:www-data /var/lib/nginx /var/log/nginx
 COPY docker/production/nginx.conf       /etc/nginx/nginx.conf
 COPY docker/production/supervisord.conf /etc/supervisord.conf
 COPY docker/production/entrypoint.sh    /usr/local/bin/entrypoint
-RUN chmod +x /usr/local/bin/entrypoint
+COPY docker/production/exit-on-fatal.sh /usr/local/bin/exit-on-fatal
+RUN chmod +x /usr/local/bin/entrypoint /usr/local/bin/exit-on-fatal
 
 # var/data holds the SQLite file and is a volume in compose.prod.yml.
 RUN mkdir -p var/data var/cache var/log var/share \

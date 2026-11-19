@@ -15,6 +15,8 @@ services:
     restart: unless-stopped
     # Time for php-fpm and nginx to finish requests in progress on `stop`.
     stop_grace_period: 30s
+    security_opt:
+      - no-new-privileges:true
     ports:
       - '127.0.0.1:${APP_PORT:-8003}:80'
     environment:

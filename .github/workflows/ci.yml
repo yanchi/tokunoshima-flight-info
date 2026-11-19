@@ -7,10 +7,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
-# PR は新しい push で古い実行を止める。main は止めない
 permissions:
   contents: read
 
+# PR は新しい push で古い実行を止める。main は止めない
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
@@ -80,6 +80,7 @@ jobs:
   verify-prod:
     name: Production-equivalent smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - uses: actions/checkout@v7

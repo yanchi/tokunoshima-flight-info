@@ -81,7 +81,7 @@ ok 'application code is root-owned (not writable by www-data)' \
 
 echo '== a bad configuration must not start (Issue #6)'
 set +e
-bad_out="$(docker run --rm -e APP_ENV=prod -e APP_DEBUG=0 -e APP_SECRET=x \
+bad_out="$(docker run --rm --network none -e APP_ENV=prod -e APP_DEBUG=0 -e APP_SECRET=x \
     -e DATABASE_URL=sqlite:////var/www/html/var/data/x.db \
     -e CONTACT_RECIPIENT=a@example.com -e CONTACT_FROM= -e MAILER_DSN='null://null' \
     "$IMAGE" 2>&1)"
@@ -91,11 +91,30 @@ ok 'empty CONTACT_FROM / null mailer: container exits' "$([ "$bad_status" -ne 0 
 contains 'the check names the settings' "$bad_out" 'CONTACT_FROM'
 
 set +e
-dev_out="$(docker run --rm -e APP_ENV=dev "$IMAGE" 2>&1)"
+dev_out="$(docker run --rm --network none -e APP_ENV=dev "$IMAGE" 2>&1)"
 dev_status=$?
 set -e
 ok 'APP_ENV=dev: container exits' "$([ "$dev_status" -ne 0 ] && echo nonzero || echo "$dev_status")" 'nonzero'
 contains 'APP_ENV not prod is refused' "$dev_out" 'APP_ENV=prod'
+
+echo '== the container exits when nginx cannot start (supervisord FATAL)'
+# Valid settings, but an nginx.conf that fails: supervisord must give up and the
+# container must exit, so that `restart: unless-stopped` can act on it.
+badconf="$(mktemp -t tkn-verify-nginx.XXXXXX)"
+echo 'this is not a valid nginx configuration;' > "$badconf"
+fatal_state="$(docker run -d --network none -v "$badconf:/etc/nginx/nginx.conf:ro" \
+    -e APP_ENV=prod -e APP_DEBUG=0 -e APP_SECRET=x \
+    -e DATABASE_URL=sqlite:////var/www/html/var/data/f.db \
+    -e CONTACT_RECIPIENT=a@example.com -e CONTACT_FROM=b@example.com \
+    -e MAILER_DSN='smtp://u:p@smtp.example.com:587' "$IMAGE")"
+exited=no
+for _ in $(seq 1 30); do
+    if [ "$(docker inspect -f '{{.State.Running}}' "$fatal_state")" = false ]; then exited=yes; break; fi
+    sleep 2
+done
+docker rm -f "$fatal_state" >/dev/null 2>&1 || true
+rm -f "$badconf"
+ok 'container exits instead of staying up with no web server' "$exited" 'yes'
 
 echo '== start through compose.prod.yml'
 compose up -d >/dev/null
