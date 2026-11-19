@@ -10,6 +10,9 @@ build/
 /.env.local
 /.env.local.php
 /.env.*.local
+# Production settings file (docs/deploy.md); only deploy/.env.production.example is committed
+/.env.production
+/.env.staging
 /config/secrets/prod/prod.decrypt.private.php
 /public/bundles/
 /var/

@@ -21,6 +21,9 @@ phpstan.dist.neon
 .env.local
 .env.local.php
 .env.*.local
+.env.production
+.env.staging
+access-token.txt
 var
 vendor
 node_modules

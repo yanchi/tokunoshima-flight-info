@@ -5,7 +5,8 @@
 # Starts the real image through compose.prod.yml and exercises what unit tests
 # cannot: the entrypoint (bin/release), nginx + php-fpm, file ownership on the
 # volume, and the container environment reaching PHP. No external access: the
-# mailer DSN and the ODPT key are dummies and nothing here sends or fetches.
+# mailer DSN is a dummy, the ODPT key is left empty, and nothing here sends or
+# fetches.
 #
 set -euo pipefail
 
