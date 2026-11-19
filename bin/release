@@ -1,6 +1,7 @@
 #!/bin/sh
-# Release step for production: run before the app starts serving (image build
-# cannot do it, because the settings come from the real environment).
+# Release step for production. The image entrypoint runs it before the app
+# starts serving (not at image build: the settings come from the real
+# environment).
 # Stops at the first failure, so a bad configuration never reaches migrate or
 # the web server. Run it as the same user as the web server and cron, and
 # never inside a container that is already serving (it deletes var/cache/prod).

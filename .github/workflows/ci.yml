@@ -68,3 +68,59 @@ jobs:
 
       - name: Audit Composer dependencies
         run: composer audit --locked
+
+  # Starts the real production image through compose.prod.yml. PHPUnit runs
+  # against the test container and cannot catch problems in this layer
+  # (entrypoint, nginx permissions, environment reaching PHP). Run it on every
+  # PR: whether a change affects the production setup cannot be told from the
+  # changed files (docs/deploy.md).
+  verify-prod:
+    name: Production-equivalent smoke test
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Start the production image and check it
+        run: scripts/verify-prod.sh
+
+  # Pushes the image to GHCR on main, tagged with the commit SHA (rollback = run
+  # an older SHA). Nothing is deployed from here: the VPS pulls it by hand
+  # (docs/deploy.md).
+  build-image:
+    name: Build image and push to GHCR
+    needs: [php-tests, audit, verify-prod]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Decide the image name
+        id: meta
+        run: |
+          # GHCR rejects upper case
+          REPO=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          echo "image=ghcr.io/${REPO}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/production/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.image }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

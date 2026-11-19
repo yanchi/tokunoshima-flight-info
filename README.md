@@ -15,7 +15,7 @@ composer install
 php bin/console doctrine:migrations:migrate   # DB（SQLite）のテーブルを作る・更新する
 ```
 
-デプロイの手順は `docs/deploy.md`。アプリを公開する前に `bin/release`（デプロイ前チェック・`doctrine:migrations:migrate`・キャッシュの作り直し）を実行し、失敗したら起動しない。テーブルがないと、`/` は「運航情報を取得できません」の表示になる（エラーはログに残る）。SQLite は、`DATABASE_URL` のパスにファイルがないと空のファイルを作るので、パスを誤っても気づきにくい。永続化するボリュームのパスと合っているかを確かめる。
+デプロイの手順は `docs/deploy.md`。本番イメージは起動時に `bin/release`（デプロイ前チェック・`doctrine:migrations:migrate`・キャッシュの作り直し）を実行し、失敗したら起動しない。`scripts/verify-prod.sh` で、本番と同じ構成をローカルで確かめられる（Docker が要る）。テーブルがないと、`/` は「運航情報を取得できません」の表示になる（エラーはログに残る）。SQLite は、`DATABASE_URL` のパスにファイルがないと空のファイルを作るので、パスを誤っても気づきにくい。永続化するボリュームのパスと合っているかを確かめる。
 
 時刻表の公開について（`docs/data-source-verification.md` §7 手順 7・§8）：
 

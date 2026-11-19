@@ -1,0 +1,43 @@
+# Production on the VPS (docs/deploy.md). Settings come from the real
+# environment only: `--env-file .env.production` feeds the ${...} below, and
+# nothing like .env.local is in the image.
+#
+#   docker compose -f compose.prod.yml --env-file .env.production up -d
+#
+# 127.0.0.1 only: the host nginx proxies to it. Ports already used on the VPS by
+# other services must be checked before choosing APP_PORT (docs/deploy.md).
+
+name: tokunoshima-flight-info
+
+services:
+  app:
+    image: ${APP_IMAGE:?set APP_IMAGE (an image tag, never latest by accident)}
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:${APP_PORT:-8003}:80'
+    environment:
+      APP_ENV: prod
+      APP_DEBUG: '0'
+      APP_SECRET: ${APP_SECRET:?set APP_SECRET in .env.production}
+      # Fixed here, not taken from the env file: the volume path below.
+      DATABASE_URL: sqlite:////var/www/html/var/data/tkn.db
+      # The container is reachable only from the host nginx, so its peer is the
+      # one proxy to trust. Without this every visitor shares one client address
+      # (the /contact rate limit would stop everyone).
+      SYMFONY_TRUSTED_PROXIES: REMOTE_ADDR
+      CONTACT_RECIPIENT: ${CONTACT_RECIPIENT:?set CONTACT_RECIPIENT in .env.production}
+      CONTACT_FROM: ${CONTACT_FROM:?set CONTACT_FROM in .env.production}
+      MAILER_DSN: ${MAILER_DSN:?set MAILER_DSN in .env.production}
+      # Empty until the timetable gate decision (docs/deploy.md).
+      ODPT_CONSUMER_KEY: ${ODPT_CONSUMER_KEY:-}
+      TIMETABLE_WARN_AFTER_SECONDS: ${TIMETABLE_WARN_AFTER_SECONDS:-259200}
+      TIMETABLE_SUSPEND_AFTER_SECONDS: ${TIMETABLE_SUSPEND_AFTER_SECONDS:-604800}
+    volumes:
+      # The SQLite file. Never `docker compose down -v`: it deletes the database.
+      - tkn-data:/var/www/html/var/data
+    logging:
+      driver: json-file
+      options: { max-size: '10m', max-file: '3' }
+
+volumes:
+  tkn-data:
