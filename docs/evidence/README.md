@@ -32,3 +32,12 @@ URL の `<KEY>` は、本物のキーを伏せた箇所。
 |---|---|---|
 | sched_from.{json,headers} | `odpt:FlightSchedule?odpt:operator=odpt.Operator:JAL&odpt:originAirport=odpt.Airport:TKN&acl:consumerKey=<KEY>` | 200 |
 | sched_to.{json,headers} | `odpt:FlightSchedule?odpt:operator=odpt.Operator:JAL&odpt:destinationAirport=odpt.Airport:TKN&acl:consumerKey=<KEY>` | 200 |
+
+## 2026-11-19（02:38〜15:08 JST）
+運航時間帯の状態の推移を観測した（検証記録 §6）。02:38 に1回、02:41〜15:08 に 15 分おきで 48 回、計 49 回取得した。02:38 の1回は、同じリクエストを `run.log` のない手動実行で取った（2回目以降は `run.log` に記録）。09:11 → 10:08 の 57 分間は取得できていない。出発・到着とも HTTP 200。`2026-11-19/` に保存し、ファイル名の時刻は取得時刻（JST、`YYYYMMDDTHHMMSS`）。
+
+| ファイル | リクエスト | HTTP |
+|---|---|---|
+| dep_`<時刻>`.{json,headers} | `odpt:FlightInformationDeparture?odpt:operator=odpt.Operator:JAL&odpt:departureAirport=odpt.Airport:TKN&acl:consumerKey=<KEY>` | 200 |
+| arr_`<時刻>`.{json,headers} | `odpt:FlightInformationArrival?odpt:operator=odpt.Operator:JAL&odpt:arrivalAirport=odpt.Airport:TKN&acl:consumerKey=<KEY>` | 200 |
+| run.log | 取得スクリプトの実行ログ（時刻・HTTP ステータス・件数のみ）。02:41 以降の 48 回分で、02:38 の1回分は含まない | — |
