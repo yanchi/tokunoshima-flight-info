@@ -1,0 +1,53 @@
+{% extends 'base.html.twig' %}
+
+{% set nav_current = 'contact' %}
+
+{% block title %}お問い合わせ | {{ parent() }}{% endblock %}
+
+{% block body %}
+    <h1>お問い合わせ</h1>
+
+    <section class="info-section" aria-labelledby="contact-notes">
+        <h2 id="contact-notes">お問い合わせの前に</h2>
+        <ul>
+            <li>このフォームの宛先は、本サイトの運営者です。航空会社や公共交通オープンデータセンターではありません。</li>
+            <li>本サイトの表示内容について、航空会社への問い合わせはご遠慮ください。</li>
+            <li>最新の運航状況は、日本航空（JAL）公式サイトでご確認ください。このフォームでは運航状況をお答えできません。</li>
+            <li>返信先のメールアドレスは、入力した場合だけ、返信のために使います。本サイトには保存しません。お問い合わせの内容は運営者へメールで送られ、運営者の受信箱とメールサーバーに残ります。</li>
+            <li>返信できる時期はお約束できません。</li>
+        </ul>
+    </section>
+
+    {% if state == 'unavailable' %}
+        <p class="form-error" role="alert">お問い合わせフォームは準備中です。</p>
+    {% else %}
+        {% if state == 'limited' %}
+            <p class="form-error" role="alert">送信の回数が多いため、いまは受け付けられません。時間をおいてからお試しください。</p>
+        {% elseif state == 'failed' %}
+            <p class="form-error" role="alert">送信できませんでした。入力した内容は残っています。時間をおいてから、もう一度お試しください。</p>
+        {% endif %}
+
+        {{ form_start(form, {attr: {class: 'contact-form', novalidate: 'novalidate'}}) }}
+            {% if form.vars.errors|length %}
+                <div class="form-error" role="alert">{{ form_errors(form) }}</div>
+            {% endif %}
+            <div class="form-field">
+                {{ form_label(form.body) }}
+                {{ form_errors(form.body) }}
+                {{ form_widget(form.body) }}
+                <p>2000文字以内で入力してください。</p>
+            </div>
+            <div class="form-field">
+                {{ form_label(form.replyTo) }}
+                {{ form_errors(form.replyTo) }}
+                {{ form_widget(form.replyTo) }}
+            </div>
+            <div class="form-trap" aria-hidden="true">
+                <label for="{{ form.website.vars.id }}">この欄は入力しないでください</label>
+                {{ form_widget(form.website) }}
+            </div>
+            {{ form_rest(form) }}
+            <button type="submit">送信する</button>
+        {{ form_end(form, {render_rest: false}) }}
+    {% endif %}
+{% endblock %}

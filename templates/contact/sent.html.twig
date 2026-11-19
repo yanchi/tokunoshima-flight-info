@@ -1,0 +1,10 @@
+{% extends 'base.html.twig' %}
+
+{% set nav_current = 'contact' %}
+
+{% block title %}お問い合わせを送信しました | {{ parent() }}{% endblock %}
+
+{% block body %}
+    <h1>お問い合わせを送信しました</h1>
+    <p role="status">お問い合わせを受け付けました。返信が必要な内容でも、返信の時期はお約束できません。</p>
+{% endblock %}

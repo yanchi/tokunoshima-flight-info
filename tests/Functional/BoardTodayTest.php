@@ -49,7 +49,6 @@ final class BoardTodayTest extends WebTestCase
     {
         Clock::set(new NativeClock());
         date_default_timezone_set($this->defaultTimezone);
-        unset($_ENV['CONTACT_ADDRESS'], $_SERVER['CONTACT_ADDRESS']);
         parent::tearDown();
     }
 
@@ -128,29 +127,15 @@ final class BoardTodayTest extends WebTestCase
         self::assertSame(['未取得', 'なし'], $crawler->filter('.board-meta dd')->each(static fn (Crawler $dd) => $dd->text()));
     }
 
-    public function testOmitsContactSentenceWhileContactAddressIsUnset(): void
+    public function testOfficialNoticeLinksToTheContactForm(): void
     {
         $crawler = $this->client->request('GET', '/');
 
         $notice = $crawler->filter('.official-notice');
         self::assertStringContainsString(self::OFFICIAL_SENTENCE, $notice->text());
         self::assertStringContainsString('本サイトの表示内容について、航空会社への問い合わせはご遠慮ください。', $notice->text());
-        self::assertStringNotContainsString('お問い合わせは', $notice->text());
-        self::assertCount(0, $notice->filter('a'));
-    }
-
-    public function testShowsContactSentenceWhenContactAddressIsSet(): void
-    {
-        self::ensureKernelShutdown();
-        $_ENV['CONTACT_ADDRESS'] = $_SERVER['CONTACT_ADDRESS'] = 'contact@example.test';
-        $client = static::createClient();
-
-        $crawler = $client->request('GET', '/');
-
-        self::assertStringContainsString(
-            '本サイトの表示内容について、航空会社への問い合わせはご遠慮ください。お問い合わせはcontact@example.testまで。',
-            $crawler->filter('.official-notice')->text(),
-        );
+        self::assertStringContainsString('お問い合わせはこちらのフォームまで。', $notice->text());
+        self::assertCount(1, $notice->filter('a[href="/contact"]'));
     }
 
     public function testFetchedButNotPublishedShowsNoFlights(): void

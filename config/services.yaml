@@ -8,7 +8,9 @@
 # https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
 parameters:
     # Lets the app boot from real environment variables without a .env file.
-    env(CONTACT_ADDRESS): ''
+    env(CONTACT_RECIPIENT): ''
+    env(CONTACT_FROM): ''
+    env(MAILER_DSN): 'null://null'
     env(ODPT_CONSUMER_KEY): ''
     # Read as raw strings and validated by TimetableFreshnessPolicy, so an
     # unset or malformed value stops the timetable instead of every page

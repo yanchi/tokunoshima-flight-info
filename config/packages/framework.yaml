@@ -19,6 +19,19 @@ framework:
         Symfony\Component\HttpKernel\Exception\MethodNotAllowedHttpException:
             log_level: info
 
+    # Contact form (docs/data-source-verification.md §8 「問い合わせフォーム」).
+    # Per client: stops one person from flooding the operator. Global: stops a
+    # crowd of clients from using up the mail account's sending limit.
+    rate_limiter:
+        contact_form:
+            policy: fixed_window
+            limit: 5
+            interval: '1 hour'
+        contact_form_global:
+            policy: fixed_window
+            limit: 50
+            interval: '1 day'
+
     #esi: true
     #fragments: true
 

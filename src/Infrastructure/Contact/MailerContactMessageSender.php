@@ -1,0 +1,69 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Infrastructure\Contact;
+
+use App\Application\DTO\ContactMessage;
+use App\Application\Port\ContactMessageNotSent;
+use App\Application\Port\ContactMessageSenderInterface;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
+use Symfony\Component\Mailer\MailerInterface;
+use Symfony\Component\Mime\Address;
+use Symfony\Component\Mime\Email;
+
+/**
+ * Mails the message to the operator. The body and the reply-to address are
+ * never logged (CLAUDE.md §8: no personal information in logs).
+ */
+final readonly class MailerContactMessageSender implements ContactMessageSenderInterface
+{
+    private const SUBJECT = '【徳之島空港 運航情報】お問い合わせ';
+
+    public function __construct(
+        private MailerInterface $mailer,
+        private LoggerInterface $logger,
+        #[Autowire(env: 'CONTACT_RECIPIENT')]
+        private string $recipient,
+        #[Autowire(env: 'CONTACT_FROM')]
+        private string $from,
+    ) {
+    }
+
+    public function isConfigured(): bool
+    {
+        return '' !== trim($this->recipient) && '' !== trim($this->from);
+    }
+
+    public function send(ContactMessage $message): void
+    {
+        if (!$this->isConfigured()) {
+            throw new ContactMessageNotSent('The contact recipient or sender is not configured.');
+        }
+
+        $email = (new Email())
+            ->from(new Address(trim($this->from), '徳之島空港 運航情報'))
+            ->to(new Address(trim($this->recipient)))
+            ->subject(self::SUBJECT)
+            ->text(\sprintf(
+                "受付日時（日本時間）：%s\n返信先：%s\n\n%s\n",
+                $message->receivedAt->setTimezone(new \DateTimeZone('Asia/Tokyo'))->format('Y-m-d H:i'),
+                $message->replyTo ?? '（入力なし）',
+                $message->body,
+            ));
+        if (null !== $message->replyTo) {
+            $email->replyTo(new Address($message->replyTo));
+        }
+
+        try {
+            $this->mailer->send($email);
+        } catch (TransportExceptionInterface $e) {
+            // Class only: the exception text can carry the address or the DSN.
+            $this->logger->error('Contact message was not sent.', ['exception_class' => $e::class]);
+
+            throw new ContactMessageNotSent('The contact message was not sent.', 0, $e);
+        }
+    }
+}

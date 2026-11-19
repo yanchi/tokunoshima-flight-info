@@ -14,26 +14,30 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
  * Run before every production deploy. Fails while a setting required for
- * public release is empty or still a placeholder, e.g. the contact address
- * that the ODPT developer guideline 3.1(3) requires. Prints variable names
- * only, never their values.
+ * public release is empty or still a placeholder, e.g. the contact form
+ * settings (the ODPT developer guideline 3.1(3) requires a contact). Prints
+ * variable names only, never their values.
  */
 #[AsCommand(name: 'app:check-deploy-config', description: 'Fails if a setting required for public release is empty or a placeholder')]
 final class CheckDeployConfigCommand extends Command
 {
     /**
-     * The placeholder used in CLAUDE.md §6 until the contact is decided, and
-     * its look-alike (U+25CB WHITE CIRCLE).
+     * The mailer DSN schemes that deliver nothing, so a form submitted in
+     * production would be lost.
      */
-    private const CONTACT_PLACEHOLDERS = ['〇〇', '○○'];
+    private const NON_DELIVERING_MAILER_SCHEMES = ['null://', 'null:', 'native://'];
 
     public function __construct(
         #[Autowire('%kernel.environment%')]
         private readonly string $environment,
         #[Autowire(env: 'APP_SECRET')]
         private readonly string $appSecret,
-        #[Autowire(env: 'CONTACT_ADDRESS')]
-        private readonly string $contactAddress,
+        #[Autowire(env: 'CONTACT_RECIPIENT')]
+        private readonly string $contactRecipient,
+        #[Autowire(env: 'CONTACT_FROM')]
+        private readonly string $contactFrom,
+        #[Autowire(env: 'MAILER_DSN')]
+        private readonly string $mailerDsn,
         private readonly TimetableFreshnessPolicy $timetableFreshnessPolicy,
     ) {
         parent::__construct();
@@ -55,8 +59,14 @@ final class CheckDeployConfigCommand extends Command
         if ('' === trim($this->appSecret)) {
             $missing[] = 'APP_SECRET';
         }
-        if ('' === trim($this->contactAddress) || $this->containsPlaceholder($this->contactAddress)) {
-            $missing[] = 'CONTACT_ADDRESS';
+        if ('' === trim($this->contactRecipient)) {
+            $missing[] = 'CONTACT_RECIPIENT';
+        }
+        if ('' === trim($this->contactFrom)) {
+            $missing[] = 'CONTACT_FROM';
+        }
+        if ('' === trim($this->mailerDsn) || $this->isNonDeliveringMailer($this->mailerDsn)) {
+            $missing[] = 'MAILER_DSN';
         }
 
         // Checked at run time as well; this only catches it earlier (§7 step 7).
@@ -75,10 +85,11 @@ final class CheckDeployConfigCommand extends Command
         return Command::SUCCESS;
     }
 
-    private function containsPlaceholder(string $value): bool
+    private function isNonDeliveringMailer(string $dsn): bool
     {
-        foreach (self::CONTACT_PLACEHOLDERS as $placeholder) {
-            if (str_contains($value, $placeholder)) {
+        $dsn = strtolower(trim($dsn));
+        foreach (self::NON_DELIVERING_MAILER_SCHEMES as $scheme) {
+            if (str_starts_with($dsn, $scheme)) {
                 return true;
             }
         }
