@@ -1,0 +1,33 @@
+# Keep the image to what the app needs. docs/ is excluded on purpose: the raw
+# ODPT responses under docs/evidence must never end up in an image.
+.git
+.github
+.claude
+.agents
+.codex
+.specify
+AGENTS.md
+CLAUDE.md
+docs
+tests
+tokunoshima-flight-info.code-workspace
+.phpunit.cache
+.php-cs-fixer.cache
+phpunit.dist.xml
+phpstan.dist.neon
+.php-cs-fixer.dist.php
+
+# Settings and local state never go into the image (docs/deploy.md).
+.env.local
+.env.local.php
+.env.*.local
+.env.production
+.env.staging
+access-token.txt
+config/secrets/*/*.decrypt.private.php
+var
+vendor
+node_modules
+deploy
+scripts
+compose*.yml

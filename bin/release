@@ -1,0 +1,34 @@
+#!/bin/sh
+# Release step for production. The image entrypoint runs it before the app
+# starts serving (not at image build: the settings come from the real
+# environment).
+# Stops at the first failure, so a bad configuration never reaches migrate or
+# the web server. Run it as the same user as the web server and cron, and
+# never inside a container that is already serving (it deletes var/cache/prod).
+# See docs/deploy.md.
+set -eu
+
+cd "$(dirname "$0")/.."
+
+# Do not override these: exporting here would only affect this process, so a
+# missing setting would pass the check while the web server and cron run as
+# the .env default (dev). Fail instead.
+if [ "${APP_ENV:-}" != "prod" ] || [ "${APP_DEBUG:-}" != "0" ]; then
+    echo "Set APP_ENV=prod and APP_DEBUG=0 in the environment of the container." >&2
+    exit 1
+fi
+
+# Settings come from the real environment only (docs/deploy.md). A missing
+# DATABASE_URL would silently create an empty SQLite file under var/ (the
+# .env default), so refuse it here.
+if [ -z "${DATABASE_URL:-}" ]; then
+    echo "DATABASE_URL is not set in the environment." >&2
+    exit 1
+fi
+
+# The prod cache is never refreshed by itself: a stale one would make the check
+# below run against an old container. Clear it first.
+rm -rf var/cache/prod
+php bin/console app:check-deploy-config
+php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration
+php bin/console cache:warmup
