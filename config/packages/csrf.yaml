@@ -1,0 +1,8 @@
+# The form uses a session-stored token (token_id: contact in ContactFormType),
+# so it works without JavaScript. The stateless tokens the recipe enabled need
+# a script or Origin/Referer headers, which this site does not rely on.
+framework:
+    form:
+        csrf_protection: true
+
+    csrf_protection: true

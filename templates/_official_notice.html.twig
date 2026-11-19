@@ -3,6 +3,6 @@
     <p>{{ include('_official_status_sentence.html.twig')|trim }}</p>
     <p>
         本サイトの表示内容について、航空会社への問い合わせはご遠慮ください。
-        {%- if contact_address %}お問い合わせは{{ contact_address }}まで。{% endif %}
+        お問い合わせは<a href="{{ path('contact') }}">お問い合わせフォーム</a>まで。
     </p>
 </aside>

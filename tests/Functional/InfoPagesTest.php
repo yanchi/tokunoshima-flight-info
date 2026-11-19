@@ -25,12 +25,6 @@ final class InfoPagesTest extends WebTestCase
         self::resetDatabaseSchema(static::getContainer());
     }
 
-    protected function tearDown(): void
-    {
-        unset($_ENV['CONTACT_ADDRESS'], $_SERVER['CONTACT_ADDRESS']);
-        parent::tearDown();
-    }
-
     /**
      * @return iterable<string, array{string, string}>
      */
@@ -107,26 +101,20 @@ final class InfoPagesTest extends WebTestCase
         self::assertSelectorExists(\sprintf('.footer-nav a[href="%s"][aria-current="page"]', $path));
     }
 
-    public function testShowsContactAsPendingWhileContactAddressIsUnset(): void
+    #[DataProvider('pages')]
+    public function testOfficialNoticeLinksToTheContactForm(string $path): void
+    {
+        $this->client->request('GET', $path);
+
+        self::assertSelectorTextContains('.official-notice', 'お問い合わせはお問い合わせフォームまで。');
+        self::assertSelectorExists('.official-notice a[href="/contact"]');
+    }
+
+    public function testAboutLinksToTheContactForm(): void
     {
         $this->client->request('GET', '/about');
 
-        self::assertSelectorTextSame('.contact-address', '準備中');
-    }
-
-    #[DataProvider('pages')]
-    public function testShowsContactAddressWhenSet(string $path): void
-    {
-        self::ensureKernelShutdown();
-        $_ENV['CONTACT_ADDRESS'] = $_SERVER['CONTACT_ADDRESS'] = 'contact@example.test';
-        $client = static::createClient();
-
-        $client->request('GET', $path);
-
-        self::assertSelectorTextContains('.official-notice', 'お問い合わせはcontact@example.testまで。');
-        if ('/about' === $path) {
-            self::assertSelectorTextSame('.contact-address', 'contact@example.test');
-        }
+        self::assertSelectorExists('.contact-link a[href="/contact"]');
     }
 
     public function testHeaderLinksToSiblingFerrySite(): void
@@ -154,9 +142,11 @@ final class InfoPagesTest extends WebTestCase
         $crawler = $this->client->request('GET', $path);
 
         $credit = $crawler->filter('.site-footer .data-credit');
-        self::assertSame(
+        // Checked on the raw HTML: the test crawler's HTML5 parser on PHP 8.4.3
+        // broke a multibyte character in this text node (browsers are not affected).
+        self::assertStringContainsString(
             '本サイトが利用する公共交通データは、公共交通オープンデータセンターにおいて提供されるものです。公共交通事業者により提供されたデータを元にしていますが、必ずしも正確・完全なものとは限りません。本サイトの表示内容について、公共交通事業者への直接の問合せは行わないでください。',
-            $credit->text(),
+            (string) $this->client->getResponse()->getContent(),
         );
         // No data provider name in the credit (§2 「クレジット表記の決定」).
         self::assertStringNotContainsString('日本航空', $credit->text());
@@ -164,18 +154,12 @@ final class InfoPagesTest extends WebTestCase
     }
 
     #[DataProvider('allPages')]
-    public function testOdptCreditGivesTheContactAddressWhenSet(string $path): void
+    public function testOdptCreditLinksToTheContactForm(string $path): void
     {
-        self::ensureKernelShutdown();
-        $_ENV['CONTACT_ADDRESS'] = $_SERVER['CONTACT_ADDRESS'] = 'contact@example.test';
-        $client = static::createClient();
-        self::resetDatabaseSchema(static::getContainer());
+        $this->client->request('GET', $path);
 
-        $client->request('GET', $path);
-
-        // Checked on the raw HTML: the test crawler's HTML5 parser on PHP 8.4.3
-        // broke a multibyte character in this text node (browsers are not affected).
-        self::assertStringContainsString('本サイトに関するお問い合わせは、以下のメールアドレスにお願いします。', (string) $client->getResponse()->getContent());
-        self::assertSelectorTextSame('.data-credit-contact', 'contact@example.test');
+        // Raw HTML: see the note on the credit text test above.
+        self::assertStringContainsString('本サイトに関するお問い合わせは、以下のお問い合わせフォームにお願いします。', (string) $this->client->getResponse()->getContent());
+        self::assertSelectorTextSame('.data-credit-contact a[href="/contact"]', 'お問い合わせフォーム');
     }
 }

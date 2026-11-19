@@ -295,3 +295,45 @@ h2 {
     color: var(--color-muted);
     font-size: 0.9rem;
 }
+
+/* Contact form */
+.contact-form .form-field {
+    margin-bottom: 1rem;
+}
+
+.contact-form label {
+    display: block;
+    margin-bottom: 0.25rem;
+    font-weight: bold;
+}
+
+.contact-form textarea,
+.contact-form input[type="email"] {
+    box-sizing: border-box;
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid var(--color-muted);
+    font: inherit;
+}
+
+.contact-form button {
+    padding: 0.6rem 1.5rem;
+    font: inherit;
+    cursor: pointer;
+}
+
+.form-error {
+    margin: 0.25rem 0 0;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--color-error-border);
+    background: var(--color-error-bg);
+}
+
+/* Honeypot: off screen, not display:none, so simple bots still fill it. */
+.contact-form .form-trap {
+    position: absolute;
+    left: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+}

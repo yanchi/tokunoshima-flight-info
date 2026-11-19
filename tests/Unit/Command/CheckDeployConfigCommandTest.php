@@ -15,7 +15,7 @@ final class CheckDeployConfigCommandTest extends TestCase
 {
     public function testPassesWhenAllSettingsAreSet(): void
     {
-        $tester = new CommandTester(new CheckDeployConfigCommand('prod', 'test-secret', 'test@example.invalid', self::validThresholds()));
+        $tester = new CommandTester(self::command('prod', 'test-secret'));
 
         self::assertSame(Command::SUCCESS, $tester->execute([]));
     }
@@ -32,31 +32,36 @@ final class CheckDeployConfigCommandTest extends TestCase
     #[DataProvider('nonProdEnvironments')]
     public function testFailsOutsideProd(string $environment): void
     {
-        $tester = new CommandTester(new CheckDeployConfigCommand($environment, 'test-secret', 'test@example.invalid', self::validThresholds()));
+        $tester = new CommandTester(self::command($environment, 'test-secret'));
 
         self::assertSame(Command::FAILURE, $tester->execute([], ['capture_stderr_separately' => true]));
         self::assertStringContainsString('APP_ENV=prod', $tester->getErrorOutput());
     }
 
     /**
-     * @return iterable<string, array{string, string, string}>
+     * @return iterable<string, array{string, string, string, string, string}>
      */
-    public static function emptySettings(): iterable
+    public static function badSettings(): iterable
     {
-        yield 'secret empty' => ['', 'test@example.invalid', 'APP_SECRET'];
-        yield 'secret blank' => ['  ', 'test@example.invalid', 'APP_SECRET'];
-        yield 'contact empty' => ['test-secret', '', 'CONTACT_ADDRESS'];
-        yield 'contact blank' => ['test-secret', '  ', 'CONTACT_ADDRESS'];
-        yield 'contact placeholder' => ['test-secret', '〇〇', 'CONTACT_ADDRESS'];
-        yield 'contact placeholder in text' => ['test-secret', 'お問い合わせは〇〇まで', 'CONTACT_ADDRESS'];
-        yield 'contact look-alike placeholder' => ['test-secret', '○○', 'CONTACT_ADDRESS'];
-        yield 'both empty' => ['', '', 'APP_SECRET, CONTACT_ADDRESS'];
+        yield 'secret empty' => ['', 'to@example.invalid', 'from@example.invalid', 'smtp://u:p@mail.invalid:587', 'APP_SECRET'];
+        yield 'secret blank' => ['  ', 'to@example.invalid', 'from@example.invalid', 'smtp://u:p@mail.invalid:587', 'APP_SECRET'];
+        yield 'recipient empty' => ['test-secret', '', 'from@example.invalid', 'smtp://u:p@mail.invalid:587', 'CONTACT_RECIPIENT'];
+        yield 'recipient blank' => ['test-secret', '  ', 'from@example.invalid', 'smtp://u:p@mail.invalid:587', 'CONTACT_RECIPIENT'];
+        yield 'from empty' => ['test-secret', 'to@example.invalid', '', 'smtp://u:p@mail.invalid:587', 'CONTACT_FROM'];
+        yield 'dsn empty' => ['test-secret', 'to@example.invalid', 'from@example.invalid', '', 'MAILER_DSN'];
+        yield 'dsn null transport' => ['test-secret', 'to@example.invalid', 'from@example.invalid', 'null://null', 'MAILER_DSN'];
+        yield 'dsn native transport' => ['test-secret', 'to@example.invalid', 'from@example.invalid', 'native://default', 'MAILER_DSN'];
+        yield 'recipient not an address' => ['test-secret', 'a..b@example.invalid', 'from@example.invalid', 'smtp://u:p@mail.invalid:587', 'CONTACT_RECIPIENT'];
+        yield 'from not an address' => ['test-secret', 'to@example.invalid', 'not-an-address', 'smtp://u:p@mail.invalid:587', 'CONTACT_FROM'];
+        yield 'dsn without host' => ['test-secret', 'to@example.invalid', 'from@example.invalid', 'smtp://', 'MAILER_DSN'];
+        yield 'dsn with a raw hash in the password' => ['test-secret', 'to@example.invalid', 'from@example.invalid', 'smtp://u:pa#ss@mail.invalid:587', 'MAILER_DSN'];
+        yield 'all empty' => ['', '', '', '', 'APP_SECRET, CONTACT_RECIPIENT, CONTACT_FROM, MAILER_DSN'];
     }
 
-    #[DataProvider('emptySettings')]
-    public function testFailsAndNamesEmptySettings(string $secret, string $contact, string $expected): void
+    #[DataProvider('badSettings')]
+    public function testFailsAndNamesBadSettings(string $secret, string $recipient, string $from, string $dsn, string $expected): void
     {
-        $tester = new CommandTester(new CheckDeployConfigCommand('prod', $secret, $contact, self::validThresholds()));
+        $tester = new CommandTester(new CheckDeployConfigCommand('prod', $secret, $recipient, $from, $dsn, self::validThresholds()));
 
         self::assertSame(Command::FAILURE, $tester->execute([], ['capture_stderr_separately' => true]));
         self::assertStringContainsString('Unset or invalid settings (empty, placeholder or out of range): '.$expected, $tester->getErrorOutput());
@@ -65,7 +70,7 @@ final class CheckDeployConfigCommandTest extends TestCase
 
     public function testDoesNotPrintValues(): void
     {
-        $tester = new CommandTester(new CheckDeployConfigCommand('prod', 'do-not-print-this', '', self::validThresholds()));
+        $tester = new CommandTester(new CheckDeployConfigCommand('prod', 'do-not-print-this', '', '', 'smtp://user:do-not-print-this@mail.invalid:587', self::validThresholds()));
         $tester->execute([], ['capture_stderr_separately' => true]);
 
         self::assertStringNotContainsString('do-not-print-this', $tester->getDisplay().$tester->getErrorOutput());
@@ -73,10 +78,15 @@ final class CheckDeployConfigCommandTest extends TestCase
 
     public function testFailsAndNamesInvalidTimetableThresholds(): void
     {
-        $tester = new CommandTester(new CheckDeployConfigCommand('prod', 'test-secret', 'test@example.invalid', new TimetableFreshnessPolicy('604800', '259200')));
+        $tester = new CommandTester(new CheckDeployConfigCommand('prod', 'test-secret', 'to@example.invalid', 'from@example.invalid', 'smtp://u:p@mail.invalid:587', new TimetableFreshnessPolicy('604800', '259200')));
 
         self::assertSame(Command::FAILURE, $tester->execute([], ['capture_stderr_separately' => true]));
         self::assertStringContainsString('TIMETABLE_WARN_AFTER_SECONDS / TIMETABLE_SUSPEND_AFTER_SECONDS', $tester->getErrorOutput());
+    }
+
+    private static function command(string $environment, string $secret): CheckDeployConfigCommand
+    {
+        return new CheckDeployConfigCommand($environment, $secret, 'to@example.invalid', 'from@example.invalid', 'smtp://u:p@mail.invalid:587', self::validThresholds());
     }
 
     private static function validThresholds(): TimetableFreshnessPolicy

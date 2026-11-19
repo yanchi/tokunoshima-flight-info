@@ -29,7 +29,9 @@ ODPT のアクセストークンなどの認証情報は `.env.local` に書く�
 | `APP_SECRET` | Symfony のシークレット。値は Git にコミットしない。本番での渡し方はデプロイ手順で決める（#6） |
 | `ODPT_CONSUMER_KEY` | ODPT のアクセストークン（`.env.local` のみ） |
 | `DATABASE_URL` | DB の接続先。既定は環境ごとの SQLite ファイル（`var/data_<環境>.db`）。本番ではファイルを永続化するボリュームに置く（置き場所はデプロイ手順で決める） |
-| `CONTACT_ADDRESS` | 問い合わせ先のメールアドレス。公式運航情報の案内と、全ページのフッターの ODPT のクレジット（「以下のメールアドレスにお願いします」）に出すので、メールアドレスを設定する。デプロイ前チェックはメールアドレスの形式までは確かめないので、URL などを設定しないよう注意する。空の間は「お問い合わせは〇〇まで。」の文を出さない。空でよいのは開発・テスト環境だけで、本番公開前に必ず設定する。プレースホルダーの「〇〇」（「○○」も）を含む値は、デプロイ前チェックで未設定として扱う |
+| `CONTACT_RECIPIENT` | 問い合わせフォーム（`/contact`）の受信先メールアドレス（運営者）。どの画面にも出さない。空の間、`/contact` は 503「準備中」を返す。空でよいのは開発・テスト環境だけ |
+| `CONTACT_FROM` | 問い合わせメールの差出人アドレス。さくらのレンタルサーバーでは、SMTP 認証のアドレスと同じにする（未確認）。どの画面にも出さない |
+| `MAILER_DSN` | メール送信の接続先（例：`smtp://ユーザー名:パスワード@ホスト:587`。`@` は `%40`、パスワードの記号は URL エンコード）。パスワードを含むので `.env.local` か本番の実環境変数にだけ置き、Git にコミットしない。既定の `null://null` は何も送らない。本番では `null://` と `native://` をデプロイ前チェックで拒み、`/contact` も 503 にする |
 
 ## 開発コマンド
 
@@ -39,7 +41,7 @@ vendor/bin/phpstan analyse               # 静的解析
 vendor/bin/php-cs-fixer fix --dry-run --diff   # コーディング規約チェック
 composer lint                            # YAML設定・Twig・サービスコンテナの検証
 symfony server:start                     # 開発用サーバー（Symfony CLI）
-APP_ENV=prod php bin/console app:check-deploy-config  # 本番デプロイ前チェック（APP_SECRET・CONTACT_ADDRESS が空、または CONTACT_ADDRESS がプレースホルダーを含むなら失敗。prod 以外では常に失敗。現状は手動で実行する。自動実行は #6）
+APP_ENV=prod php bin/console app:check-deploy-config  # 本番デプロイ前チェック（APP_SECRET・CONTACT_RECIPIENT・CONTACT_FROM・MAILER_DSN が空、または MAILER_DSN が何も送らない設定（`null://` `native://`）なら失敗。prod 以外では常に失敗。現状は手動で実行する。自動実行は #6）
 ```
 
 ## ディレクトリ構成
