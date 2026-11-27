@@ -59,6 +59,9 @@
    # deploy/nginx/tokunoshima-flight-info.conf、deploy/nginx/error-5xx.html を置く（手で転送する。GitHub のそのコミットのファイルから）
    cp .env.production.example .env.production
    chmod 600 .env.production        # 値を入れる。コミットしない
+   # 静的な画面は、秘密のファイル（.env.production、backups/）と別のディレクトリ static/ に置く
+   chmod 755 /opt/tokunoshima-flight-info
+   install -D -m 644 error-5xx.html static/error-5xx.html
    ```
 
 3. イメージの取得：`main` の CI が GHCR に push したイメージを pull する。パッケージは最初は private。**どちらにするかは未決定**（推奨：イメージには公開リポジトリのコードだけが入り、秘密も ODPT のデータも入らない（`.dockerignore`）ので、パッケージを public にして VPS に認証情報を置かない。private のままなら、VPS で `docker login ghcr.io` する読み取り専用のトークンが要る）。
@@ -92,10 +95,10 @@
 
 2. cron の同期を止める（crontab の行をコメントアウト）。そのあと、動いている同期が終わるのを待つ（`flock /tmp/tkn-sync.lock true`。cron と同じロックのファイルで、同期1回は最悪で約 240 秒）。待たずに切り替えると、同期はコンテナの停止（30 秒後に強制終了）で途中で切れる。**許諾が終わった後のデプロイ（`docs/data-source-verification.md` §2「許諾終了時の削除」手順 8）では、手順 5 で cron を戻さない。**
 3. `.env.production` の `APP_IMAGE` を新しい SHA に書き換え、`dc pull && dc up -d --wait`（healthy にならなければ 0 以外で返る）。コンテナが作り直され、entrypoint が `bin/release`（設定の確認 → migrate → キャッシュ）を実行する。公開中のコンテナで `bin/release` を手で実行しない（`var/cache/prod` を消すため）。
-4. `dc ps` で healthy を確認し、`dc logs --tail=50 app` にエラーがないことを見る。
+4. `dc ps` で healthy を確認し、`dc logs --tail=50 app` にエラーがないことを見る。`deploy/nginx/error-5xx.html` が変わったコミットのときは、`install -m 644` で `static/` に置き直す（静的なファイルなので nginx の reload は要らない）。vhost が変わったときは、`sudo nginx -t && sudo systemctl reload nginx`。
 5. cron を戻す（許諾が終わった後は戻さない。`docs/data-source-verification.md` §2 手順 8 のとおり、cron に `app:timetable:sync` がないこと、キーがないことを確かめる）。
 
-失敗したとき（`bin/release` が止まる、起動しない。nginx や php-fpm が起動に失敗し続けた場合も、コンテナが終了して再起動される）：旧コンテナは、すでに置き換わっている。利用者には、ホスト nginx の静的な日本語の画面（502・503・504。下記「502・503・504 の画面」）が見える。このサイトは止まっていて、「更新停止／要公式確認」の画面ではなく、ODPT のクレジットも出ない（非公式の旨と公式運航情報の案内は出る）。直すか、`APP_IMAGE` を前の SHA に戻して `dc up -d` する。migrate が途中で止まっていたら、旧イメージに戻す前に、手順 1 のバックアップを戻す。`dc down`（`-v` は付けない）で止め、バックアップをボリュームに書き戻す：`docker run --rm -v tokunoshima-flight-info_tkn-data:/data -v "$PWD/backups:/b:ro" alpine sh -c 'cp /b/<ファイル名> /data/tkn.db && chown 82:82 /data/tkn.db && rm -f /data/tkn.db-wal /data/tkn.db-shm /data/tkn.db-journal'`（ボリューム名は `docker volume ls` で確かめる。www-data の uid/gid 82 は Alpine のもの。**この手順は本番で試していない**）。purge より前のバックアップを戻すと、ODPT のデータが DB に戻る（許諾が終わった後は戻さない）。旧イメージに戻したとき、DB に新しいコードにないマイグレーションが残っていても、`migrate` は警告を出すだけで 0 で終わるので、気づけない。戻すときは、DB も同じ時点に戻す。
+失敗したとき（`bin/release` が止まる、起動しない。nginx や php-fpm が起動に失敗し続けた場合も、コンテナが終了して再起動される）：旧コンテナは、すでに置き換わっている。利用者には、ホスト nginx の静的な日本語の画面（502・503・504。下記「502・503・504 の画面」）が見える。このサイトは止まっていて、「更新停止／要公式確認」の画面ではない（非公式の旨、公式運航情報の案内、ODPT のクレジットは出る）。直すか、`APP_IMAGE` を前の SHA に戻して `dc up -d` する。migrate が途中で止まっていたら、旧イメージに戻す前に、手順 1 のバックアップを戻す。`dc down`（`-v` は付けない）で止め、バックアップをボリュームに書き戻す：`docker run --rm -v tokunoshima-flight-info_tkn-data:/data -v "$PWD/backups:/b:ro" alpine sh -c 'cp /b/<ファイル名> /data/tkn.db && chown 82:82 /data/tkn.db && rm -f /data/tkn.db-wal /data/tkn.db-shm /data/tkn.db-journal'`（ボリューム名は `docker volume ls` で確かめる。www-data の uid/gid 82 は Alpine のもの。**この手順は本番で試していない**）。purge より前のバックアップを戻すと、ODPT のデータが DB に戻る（許諾が終わった後は戻さない）。旧イメージに戻したとき、DB に新しいコードにないマイグレーションが残っていても、`migrate` は警告を出すだけで 0 で終わるので、気づけない。戻すときは、DB も同じ時点に戻す。
 
 **`docker compose down -v` は実行しない。** ボリューム（DB）が消える。
 
@@ -103,12 +106,16 @@
 
 ## 502・503・504 の画面
 
-アプリのコンテナが止まっている間（デプロイでコンテナを作り直す間、起動に失敗し続けているとき）は、アプリではなくホスト nginx が 502・503・504 を返す。既定の英語の画面では、非公式の旨・公式運航情報の案内（CLAUDE.md §6）が出ないため、`deploy/nginx/error-5xx.html` を返す（運営者決定、2026-11-27）。
+アプリに届かない間（デプロイでコンテナを作り直す間、起動に失敗し続けているとき、アプリが応答せず `proxy_read_timeout` を超えたとき）は、アプリではなくホスト nginx が 502・503・504 を返す。既定の英語の画面では、非公式の旨・公式運航情報の案内（CLAUDE.md §6）が出ないため、`deploy/nginx/error-5xx.html` を返す。「静的な日本語の画面を返すこと」は、運営者の決定（2026-11-27）。
 
-- 内容：ページを表示できない旨、JAL 公式サイトの案内文（リンク・URL なし）、航空会社への問い合わせをご遠慮いただく旨、非公式サイトである旨。運航のデータは表示しないので、ODPT のクレジットは入れていない（**ODPT が不要と認めているかは未確認**）。問い合わせ先は、問い合わせフォームがアプリ側にあり止まっているため入れていない。**文言は運営者の確認待ち。**
+- 内容：ページを表示できない旨、JAL 公式サイトの案内文（リンク・URL なし）、航空会社への問い合わせをご遠慮いただく旨、ODPT のクレジット、非公式サイトである旨。運航のデータは表示しない。
+- ODPT のクレジットは入れる（運営者決定、2026-11-27。`docs/data-source-verification.md` §2「クレジットを出す条件」のとおり、エラーの画面も含め、常に出す）。ただし、ガイドライン 3.1 の文のうち「以下のお問い合わせフォームにお願いします」の一文は、アプリが止まっている間はフォームに届かないので入れない。代わりに、案内文の中で「お問い合わせは、時間をおいて、お問い合わせフォームをご利用ください。」とする（リンクなし。CLAUDE.md §6 の指定文言「お問い合わせは〇〇まで。」からの例外で、運営者決定、2026-11-27）。この画面にあるクレジットも、許諾終了後は外す（`docs/data-source-verification.md` §2「許諾終了時の削除」手順 8）。
+- **文言は運営者の確認待ち。** 本文は、アプリの 5xx の画面（「サーバーで問題が起きたため…」）と違い、原因を言わない（デプロイ中にも出るため）。「エラーコード」と、フェリーの運航情報へのリンクは入れていない（静的なファイルでは、ステータスごとの出し分けや設定値 `sibling_ferry_site_url` との二重管理になるため）。
 - `proxy_intercept_errors` は付けない。アプリが返す 500 の画面（例外の内容を出さない画面）は、そのまま返る。
-- 置き場所：VPS の `/opt/tokunoshima-flight-info/error-5xx.html`（vhost の `root` と揃える）。`location = /error-5xx.html` に `internal` を付けているので、同じディレクトリの `.env.production` などは配信されない。
-- 確かめ方（公開の直前、vhost を置いた後）：`dc stop` で止め、`curl -i -H 'Host: <実ドメイン>' http://127.0.0.1/` が 502 で日本語の画面を返すことを見て、`dc start` で戻す。DNS を向ける前は、この確認を行わない。**本番では未確認。**
+- **範囲外：** コンテナの中の nginx（`docker/production/nginx.conf`）が返す 502・504（php-fpm が落ちてからコンテナが終了するまでの間、PHP の処理が `fastcgi_read_timeout` を超えたとき）は、ホスト nginx を素通りして、英語の画面のまま届く。これを範囲外として受け入れるかは、運営者に未確認。
+- 置き場所：VPS の `/opt/tokunoshima-flight-info/static/error-5xx.html`。`.env.production` や `backups/` と同じディレクトリには置かず、`static/` を `root` にする。`location = /error-5xx.html` は完全一致で `internal` なので、直接アクセスは 404 になる。ファイルがないとき、`try_files` により状態コードは 502 のまま残る（ローカルの nginx で確認した。付けないと、障害中は全ページが 404 になる）。
+- 権限：`/opt/tokunoshima-flight-info` は 755、ファイルは 644（初回の準備のコマンド）。nginx の実行ユーザーが読めるかは、`ps -o user= -C nginx | sort -u` で調べたユーザーで `sudo -u <ユーザー> test -r /opt/tokunoshima-flight-info/static/error-5xx.html && echo ok` と確かめる。この VPS は SELinux が無効（確認済み）。
+- 確かめ方（**公開前、vhost を置いて reload した後、certbot の前に**）：`dc stop` で止め、`curl -i -H 'Host: <実ドメイン>' http://127.0.0.1/` が 502 で日本語の画面を返すことを見て、`dc start` で戻す（`dc` は「リリース（デプロイ）の手順」の 1 で定義する関数）。certbot の後は、80 番が 301 を返すだけになるので、`curl -i --resolve <実ドメイン>:443:127.0.0.1 https://<実ドメイン>/` を使う。公開中のサイトで `dc stop` すると、サイトが止まるので、公開後は行わない。**本番では未確認。**
 
 ## 同期（cron）と手動コマンド
 
@@ -137,7 +144,7 @@ VPS の cron から、起動中のコンテナの中で実行する：
 - [ ] 本番のコンテナが、本番と同じ環境変数で healthy になっている
 - [ ] 本番のコンテナから `/contact` で実際に 1 通送り、運営者の受信先に届く（VPS からさくらの 587 番ポートに届くかは未確認）
 - [ ] 本番で 400・404・405・500 の画面に例外の内容が出ず、非公式の旨・公式運航情報の案内文（JAL へのリンク・URL なし）・ODPT のクレジットが出る（500 は `docs/data-source-verification.md` の Issue #34 の項）
-- [ ] ホスト nginx の 502・503・504 で、静的な日本語の画面が返る（下記「502・503・504 の画面」。文言は運営者の確認待ち。vhost を置いた後に確かめる）
+- [ ] ホスト nginx の 502・503・504 で、静的な日本語の画面が返る（下記「502・503・504 の画面」。文言は運営者の確認待ち。vhost を置いた後、certbot の前に確かめる）
 - [ ] （DNS・certbot の後でないと確かめられない）ホスト nginx 経由で、HTTPS で表示され、`/contact` の送信回数の枠が利用者ごとに分かれる（接続元が区別される）
 - [ ] `/contact` の文言を運営者が確認した
 - [ ] 問い合わせの差出人の切り替え（下記）が済んでいる、または時期を運営者が決めた（未決定）
